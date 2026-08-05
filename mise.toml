@@ -15,10 +15,10 @@ description = "Build the at-include binary into ./dist"
 # comment on cli.Version in internal/cli/cli.go) — the goreleaser config must
 # use this same path.
 #
-# shell: these tasks use POSIX constructs — command substitution here, a
-# variable assignment in `check`, `./`-prefixed paths in the docs tasks. On
-# Windows mise defaults to cmd.exe, which parses none of that, so pin bash
-# explicitly. GitHub's windows runners ship Git Bash, so it is always present.
+#
+# This uses command substitution, which cmd.exe cannot parse, so it pins bash
+# for Windows. Unlike `check`, that costs nothing here: `go` is invoked
+# directly rather than by a child process that needs mise's PATH.
 shell = "bash -c"
 run = "go build -trimpath -ldflags \"-s -w -X github.com/happycollision/at-include/internal/cli.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)\" -o dist/at-include ./cmd/at-include"
 
@@ -37,16 +37,13 @@ run = "golangci-lint run"
 
 [tasks.check]
 description = "Verify formatting, lint, and tests — what CI runs"
-shell = "bash -c" # see the note on [tasks.build]
+# No formatting gate of its own: .golangci.yml enables gofumpt as a formatter,
+# so `golangci-lint run` already fails on unformatted files ("File is not
+# properly formatted (gofumpt)"). An earlier shell-scripted gate here was both
+# redundant and unportable — it needed POSIX syntax that cmd.exe cannot parse,
+# and forcing bash cost the task its mise-provided PATH, hiding the Go toolchain
+# from golangci-lint on Windows. Plain commands work on every platform.
 run = [
-  '''
-  out=$(gofumpt -l .)
-  if [ -n "$out" ]; then
-    echo "$out"
-    echo "The above files are not gofumpt-formatted. Run: mise run fmt" >&2
-    exit 1
-  fi
-  ''',
   "golangci-lint run",
   "go test ./... -count=1",
 ]
