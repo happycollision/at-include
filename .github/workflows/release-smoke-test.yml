@@ -1,0 +1,135 @@
+name: Release smoke test
+
+# Verifies a published release the way a consumer actually meets it: installed
+# from its GitHub release archive by mise, never built from source. The main CI
+# suite always compiles the binary itself, so it structurally cannot catch a
+# release archive whose name doesn't match what mise expects, a missing or
+# misnamed asset, a platform archive that failed to upload, or version metadata
+# lost between goreleaser and the shipped binary.
+#
+# This is a separate workflow rather than a job appended to release.yml, for
+# two reasons:
+#
+#   1. It avoids a race. A `needs: goreleaser` job starts the instant
+#      goreleaser's step exits, but mise resolves versions through the GitHub
+#      releases API, which is cached and eventually consistent — and mise
+#      caches that response on disk too. The `release: published` event, by
+#      contrast, fires only after GitHub has created the release and attached
+#      its assets, so the artifact this job installs is guaranteed to be
+#      queryable. That removes the need for a retry/wait loop entirely, and a
+#      flaky release gate is worse than no gate.
+#   2. It can be re-run on demand against any past release via
+#      workflow_dispatch, which is also how it gets verified without cutting a
+#      throwaway release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to test (e.g. v0.1.1). Defaults to the latest release."
+        required: false
+        type: string
+
+# Only needs to read the repo and query releases. The install path verifies
+# GitHub artifact attestations, which are public for a public repo, so no
+# attestations: read scope is required here.
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # One leg per platform archive that goreleaser publishes, so each is
+        # proven to download, extract, and execute — not just the linux one.
+        # The runners cover linux/amd64, darwin/arm64 (macos-latest is Apple
+        # silicon), and windows/amd64. The remaining published archives
+        # (linux/arm64, darwin/amd64) have no free hosted runner; they are
+        # covered by the checksums.txt verification every leg performs, and
+        # adding paid arm64 runners isn't worth it for this project's size.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Resolve which version to test, without a hardcoded number anywhere.
+      #
+      # For a `release` event the tag comes from the event payload. For a
+      # manual dispatch it comes from the optional input, falling back to
+      # whatever GitHub currently considers the latest release.
+      #
+      # Two values come out of this: the tag (e.g. "v0.1.1") and the bare
+      # version (e.g. "0.1.1"). They are NOT interchangeable. goreleaser sets
+      # {{.Version}} to the tag with the leading "v" stripped, so the shipped
+      # binary reports "at-include 0.1.1" while the tag is "v0.1.1", and mise's
+      # github backend likewise wants the bare version. Asserting the binary's
+      # --version against the tag verbatim would fail on every release.
+      - name: Resolve release version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${EVENT_TAG:-${INPUT_TAG:-}}"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+            echo "No tag given; using the latest release."
+          fi
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Testing tag $tag (expecting binary version $version)."
+        shell: bash
+
+      # A consumer-shaped mise.toml, generated at runtime so no release version
+      # is ever pinned in the repo. This is the whole point of the rewrite: the
+      # old examples/consumer-smoke-test/ pinned an exact version that had to
+      # be hand-bumped after every release, so it silently only ever tested one
+      # increasingly old release.
+      - name: Write a consumer-shaped mise.toml
+        working-directory: ${{ runner.temp }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          printf '[tools]\n"github:happycollision/at-include" = "%s"\n' "$VERSION" > mise.toml
+          cat mise.toml
+        shell: bash
+
+      # The install log is where the supply-chain verification becomes visible:
+      # mise prints "checksum", "verify GitHub artifact attestations", and
+      # "verify SLSA provenance" lines as it installs from the release archive.
+      # Keeping install in its own step means a failure here (bad archive,
+      # missing asset, failed attestation) is immediately distinguishable from
+      # a behavioral failure in the smoke test that follows.
+      - uses: jdx/mise-action@v2
+        with:
+          version: 2026.5.18
+          install: false
+          cache: false
+
+      - name: Install at-include from its published release
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          mise trust
+          mise install --verbose
+        shell: bash
+
+      # `mise exec` puts the installed binary on PATH for the script, which
+      # invokes it as plain `at-include`. That resolves the ".exe" on Windows
+      # without the script needing an OS-specific suffix, unlike the Go fixture
+      # suite (test/cli_test.go), which references the build output path
+      # directly and so has to append it itself.
+      - name: Run the release smoke test
+        working-directory: ${{ runner.temp }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mise exec -- bash "$GITHUB_WORKSPACE/.github/scripts/release-smoke-test.sh" "$VERSION"
+        shell: bash
