@@ -10,19 +10,15 @@
 
 # at-include — agent instructions
 
-`at-include` is a Go port of `scripts/build-agents.mjs` from the `app-variants`
-project. It flattens `@<path>` Markdown imports the way Claude Code inlines
+`at-include` flattens `@<path>` Markdown imports the way Claude Code inlines
 `@`-referenced files from a `CLAUDE.md`.
 
-**Happy-path output compatibility with the original JS is what matters** —
-the generated file's content (banner, `Contents of X (...)` markers, blank-line
-placement, single trailing newline, inline-once/cycle behavior) must not
-change. Internal implementation is ordinary, idiomatic Go; the JS is a
-historical reference for behavior, not an ongoing constraint on how the Go
-code is written. Deliberate, user-visible divergences from the JS exist and
-are documented inline as comments at the point of divergence (for example,
-the generalized banner wording) — read the comment before assuming a
-difference is a bug.
+**Output compatibility is what matters** — the generated file's content
+(banner, `Contents of X (...)` markers, blank-line placement, single trailing
+newline, inline-once/cycle behavior) is pinned by the fixture suite under
+`test/cases/` and must not change casually. Internal implementation is
+ordinary, idiomatic Go, free to change as long as that user-visible output
+stays the same.
 
 Contents of docs/architecture.md (project instructions, checked into the codebase):
 
@@ -31,7 +27,7 @@ Contents of docs/architecture.md (project instructions, checked into the codebas
 ```
 cmd/at-include        thin main: argv/env in, cli.Run's exit code out
 internal/cli          flag parsing, exit codes, usage text (cli.go)
-internal/flatten       the actual port of build-agents.mjs
+internal/flatten       the @path scan/expand/check logic
   scan.go              fence/inline-code state machine + FindImports
                         (used by --list-imports, not by expansion itself)
   expand.go            the recursive expander (Flatten/Options/expander)
@@ -57,9 +53,8 @@ consider.
 
 ## Conventions this codebase actually follows
 
-See [`docs/conventions.md`](docs/conventions.md) for testing and porting
-conventions (differential testing, `t.Parallel()` usage, fixture-case format,
-and lint suppression style).
+See [`docs/conventions.md`](docs/conventions.md) for testing conventions
+(`t.Parallel()` usage, fixture-case format, and lint suppression style).
 
 ## Build, test, lint
 

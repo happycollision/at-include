@@ -137,8 +137,10 @@ func TestFlattenDiamondEmitsSingleCopy(t *testing.T) {
 // TestFlattenGoldenDiamond pins the diamond case's EXACT full output, not just
 // substring/count checks, so a check.go-style byte-exact comparison would
 // actually catch a regression in where the "already inlined above" marker
-// lands relative to the surrounding content. Expected value verified against
-// the JS buildAgents() with the same input tree.
+// lands relative to the surrounding content. This is a golden-output test:
+// the want string is the pinned expected rendering, not derived from a
+// formula — if it fails, the renderer changed and either the code or this
+// expectation needs to be fixed.
 func TestFlattenGoldenDiamond(t *testing.T) {
 	t.Parallel()
 	root := makeTree(t, map[string]string{
@@ -282,9 +284,8 @@ func TestFlattenPreservesFencedAndInlineCode(t *testing.T) {
 // TestFlattenUnterminatedBacktickStillExpandsToken covers the least obvious
 // branch in transformLine (expand.go's closeIdx == -1 case): an unmatched
 // backtick run is emitted literally as plain text, and scanning continues so
-// a subsequent @token on the same line still expands normally. Expected
-// output verified against the JS transformLine/buildAgents with the same
-// input.
+// a subsequent @token on the same line still expands normally. The want
+// string is the pinned golden output for this input.
 func TestFlattenUnterminatedBacktickStillExpandsToken(t *testing.T) {
 	t.Parallel()
 	root := makeTree(t, map[string]string{
@@ -410,8 +411,8 @@ func TestFlattenEmptyImportedFile(t *testing.T) {
 // nested/prose-surrounded tree (not just substring checks), matching what
 // check.go's byte-exact comparison will require. Note the \n\n\n between
 // content and Bottom: the expansion's ensured trailing newline plus the
-// source's own blank line. Expected value verified against the JS
-// buildAgents() with the same input tree.
+// source's own blank line. This is a golden-output test pinning the exact
+// rendering.
 func TestFlattenGoldenSingleImport(t *testing.T) {
 	t.Parallel()
 	root := makeTree(t, map[string]string{
@@ -481,8 +482,9 @@ func mustRel(t *testing.T, base, target string) string {
 func TestFlattenTokenOutsideRootDirUsesDotDot(t *testing.T) {
 	t.Parallel()
 	// RootDir is the "sub" directory; the import reaches a sibling directory
-	// outside RootDir. The marker should show a "../" relative path, matching
-	// Node's path.relative (no special-casing for outside-root paths).
+	// outside RootDir. The marker should show a "../" relative path — the
+	// normal filepath.Rel behavior for a target outside the base directory,
+	// with no special-casing needed.
 	base := makeTree(t, map[string]string{
 		"sub/AGENTS.src.md": "@../sibling/z.md\n",
 		"sibling/z.md":      "SIBLING-CONTENT\n",

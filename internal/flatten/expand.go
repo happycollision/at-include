@@ -103,12 +103,13 @@ func (e *expander) expandFile(absPath string, depth int) (string, error) {
 	// #nosec G304 G703 -- absPath is a user-specified @import target; reading
 	// arbitrary caller-chosen files is this tool's entire purpose.
 	//
-	// Invalid (non-UTF-8) byte sequences in an imported file are passed
-	// through unchanged rather than replaced with U+FFFD (see the code-span,
-	// token, and default-rune paths in transformLine/scanLine). This is
-	// deliberate: adding a replacement-decoding pass to the hot path isn't
-	// worth it for a case that doesn't occur in practice for real
-	// instruction files, which are valid UTF-8.
+	// File contents are passed through as raw bytes without UTF-8 validation
+	// (see the code-span, token, and default-rune paths in
+	// transformLine/scanLine), so an invalid byte sequence in an imported file
+	// survives unchanged in the output rather than being replaced with U+FFFD.
+	// Adding a validating decode pass to the hot path isn't worth it for a case
+	// that doesn't occur in practice for real instruction files, which are
+	// valid UTF-8.
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return "", err
@@ -205,17 +206,16 @@ func (e *expander) tryExpandToken(token, importerDir string, depth int) (expansi
 }
 
 // toRootRel renders abs relative to RootDir with forward slashes, so generated
-// markers are identical on every platform. Matches JS
-// `relative(rootDir, abs).split("\\").join("/")`, including its behavior for
-// paths outside rootDir (a leading "../" segment) — filepath.Rel handles that
-// the same way Node's path.relative does, so no special-casing is needed.
+// markers are identical on every platform. A path outside RootDir renders with
+// a leading "../" segment (filepath.Rel's normal behavior); that case needs no
+// special-casing here.
 func (e *expander) toRootRel(abs string) string {
 	rel, err := filepath.Rel(e.opts.RootDir, abs)
 	if err != nil {
-		// filepath.Rel only errs when the two paths can't be made relative
-		// (e.g. different volumes on Windows); Node's path.relative has no
-		// such failure mode. Fall back to the absolute path, slash-normalized,
-		// which is the closest faithful behavior available.
+		// filepath.Rel only errs when the two paths can't be made relative at
+		// all (e.g. different volumes on Windows). Fall back to the absolute
+		// path, slash-normalized, which is the closest reasonable behavior
+		// available in that case.
 		return filepath.ToSlash(abs)
 	}
 	return filepath.ToSlash(rel)

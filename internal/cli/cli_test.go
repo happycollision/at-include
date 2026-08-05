@@ -1,15 +1,13 @@
 // Package cli tests intentionally do NOT call t.Parallel().
 //
-// Run's public signature (fixed by the design spec) is
-// Run(argv []string, stdout, stderr io.Writer) int — it has no working-
-// directory parameter, because relative --src/--out/--root paths must resolve
-// against the process's actual CWD, mirroring the JS's implicit
-// process.cwd()-relative resolution. Driving that from tests means calling
-// os.Chdir, which mutates process-global state: two tests changing directory
-// concurrently would race and could each observe the other's CWD. So every
-// test in this file runs serially (the package's default, absent
-// t.Parallel()), and `run` restores the previous CWD via defer before
-// returning.
+// Run's public signature is Run(argv []string, stdout, stderr io.Writer) int
+// — it has no working-directory parameter, because relative
+// --src/--out/--root paths must resolve against the process's actual CWD.
+// Driving that from tests means calling os.Chdir, which mutates
+// process-global state: two tests changing directory concurrently would race
+// and could each observe the other's CWD. So every test in this file runs
+// serially (the package's default, absent t.Parallel()), and `run` restores
+// the previous CWD via defer before returning.
 //
 // A later task (the fixture suite under test/) execs the real compiled
 // binary in its own temp directory per case, which exercises CWD-relative
@@ -193,13 +191,11 @@ func TestRunMaxDepth(t *testing.T) {
 	}
 }
 
-// TestParseArgsMaxDepthGrammar pins the exact grammar --max-depth accepts:
-// a plain non-negative integer via strconv.Atoi, nothing more. This
-// deliberately does NOT reimplement JS Number() coercion (leading "+", "0x"/
-// "0o"/"0b" prefixes, scientific notation, decimals that round-trip to an
-// integer) — that machinery was dropped as unneeded JS-compat complexity;
-// see the deleted internal/cli/jsnumber.go. "007" is valid because
-// strconv.Atoi treats a leading zero as plain decimal, not octal.
+// TestParseArgsMaxDepthGrammar pins the exact grammar --max-depth accepts: a
+// plain non-negative integer via strconv.Atoi, nothing more — no leading "+",
+// no "0x"/"0o"/"0b" prefixes, no scientific notation, no decimals. "007" is
+// valid because strconv.Atoi treats a leading zero as plain decimal, not
+// octal.
 func TestParseArgsMaxDepthGrammar(t *testing.T) {
 	valid := []struct {
 		raw  string
@@ -231,11 +227,9 @@ func TestParseArgsMaxDepthGrammar(t *testing.T) {
 
 func TestRunMaxDepthInvalidValues(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "x\n"})
-	// "1e2", "0x10", and "1_000" are deliberately included here: this port no
-	// longer reimplements JS Number() coercion (see the deleted jsnumber.go),
-	// so these forms — which the old JS-compat parser accepted — are now
-	// invalid, matching plain strconv.Atoi. This is an accepted behavior
-	// change; --max-depth only ever needs a plain non-negative integer.
+	// "1e2", "0x10", and "1_000" are deliberately included here: --max-depth
+	// only ever needs a plain non-negative integer, and strconv.Atoi rejects
+	// all three forms.
 	for _, v := range []string{"notanumber", "", "-1", "1.5", "1e2", "0x10", "1_000"} {
 		code, _, stderr := run(t, dir, "--max-depth", v)
 		if code != 2 {

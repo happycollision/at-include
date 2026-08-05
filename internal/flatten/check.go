@@ -49,16 +49,17 @@ func Check(opts Options) (CheckResult, error) {
 }
 
 // firstDiffExcerpt renders a small unified-diff-style excerpt around the first
-// line where actual and expected disagree. Ports the JS firstDiffExcerpt
-// exactly, including its undefined-vs-defined comparison semantics: a line
-// index past the end of one side is never treated as equal to a defined line
-// on the other side, and (since the scan never proceeds past n =
-// max(len(a), len(e))) is never treated as equal to a matching past-the-end
-// index on the other side either, because both sides cannot be
-// simultaneously past their own length while an index is still < n. inBoth
-// makes that guarantee explicit instead of relying on a Go zero-value
-// (empty-string) stand-in for JS's `undefined`, which would otherwise let two
-// out-of-range fetches compare spuriously equal.
+// line where actual and expected disagree.
+//
+// A line index past the end of one side must never be treated as equal to a
+// defined line on the other side. Go's zero value for a missing slice element
+// would be "" (via at()/get()), which could spuriously equal a genuinely empty
+// line on the other, in-range side. inBoth guards against that by tracking
+// "in range" explicitly instead of relying on the zero-value fallback, so an
+// out-of-range fetch on one side is never mistaken for a real match. This also
+// can't produce a false "both sides missing" match while idx < n =
+// max(len(a), len(e)): at least one side is always still in range in that
+// window, by definition of n.
 func firstDiffExcerpt(actual, expected string) string {
 	a := strings.Split(actual, "\n")
 	e := strings.Split(expected, "\n")
@@ -74,11 +75,10 @@ func firstDiffExcerpt(actual, expected string) string {
 	for k := max(0, idx-ctx); k <= idx+ctx && k < n; k++ {
 		av, aOK := get(a, k)
 		ev, eOK := get(e, k)
-		// differs mirrors JS's `a[k] !== e[k]`: a side that is out of range
-		// (JS undefined) never equals a defined value on the other side, even
-		// when that defined value happens to be "" (Go's zero value for a
-		// missing get() result). Only two in-range, equal-valued sides count
-		// as "not differs".
+		// A side that is out of range never counts as equal to a defined value
+		// on the other side, even when that defined value happens to be ""
+		// (Go's zero value for a missing get() result). Only two in-range,
+		// equal-valued sides count as "not differs".
 		differs := !aOK || !eOK || av != ev
 		switch {
 		case !differs:
@@ -112,11 +112,11 @@ func at(s []string, i int) string {
 // or both slices too short): without this guard, Go's zero-value fallback for
 // a missing index (empty string, from at()) could compare equal to a
 // genuinely empty line on the other, in-range side, which would stop the scan
-// at the wrong index. JS's `a[idx] === e[idx]` never has this problem because
-// a missing index is `undefined`, which strictly equals only another
-// `undefined` (i.e. only when BOTH sides are missing) — and both sides being
-// missing simultaneously never happens while idx < n = max(len(a), len(e)),
-// so inBoth reproduces the JS stopping point exactly for every input.
+// at the wrong index. Both sides being missing simultaneously never actually
+// happens while idx < n = max(len(a), len(e)) — at least one side is always
+// still in range in that window — so this guard never changes where the scan
+// stops for a well-formed n; it exists to make that guarantee explicit rather
+// than implicit in the zero-value coincidence.
 func inBoth(a, e []string, i int) bool {
 	return i < len(a) && i < len(e)
 }

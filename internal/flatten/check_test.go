@@ -3,7 +3,6 @@ package flatten
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -139,48 +138,13 @@ func TestCheckMissingOutputIsStaleNotAnError(t *testing.T) {
 	}
 }
 
-// --- Differential tests against the JS reference implementation ---
-//
-// These values were captured from build-agents.mjs, the tool this port
-// originated from — a historical reference for what the "First difference
-// around line N" output and trailing-newline handling should look like, not
-// an ongoing constraint on how check.go itself is implemented. The values
-// stay pinned here because they're still the correct, user-visible expected
-// output.
-//
-// The JS build-agents.mjs firstDiffExcerpt/assembleOutput are not exported, so
-// these cases were captured by copying both functions verbatim into a scratch
-// .mjs (unchanged) and running it under node against a battery of
-// (actual, expected) / content inputs. Each want value below is the JS output
-// captured byte-for-byte, via a script of this shape:
-//
-//	function firstDiffExcerpt(actual, expected) {
-//	  const a = actual.split("\n");
-//	  const e = expected.split("\n");
-//	  const n = Math.max(a.length, e.length);
-//	  let idx = 0;
-//	  while (idx < n && a[idx] === e[idx]) idx++;
-//	  const ctx = 2;
-//	  const start = Math.max(0, idx - ctx);
-//	  const lines = [];
-//	  for (let k = start; k <= idx + ctx && k < n; k++) {
-//	    if (a[k] === e[k]) lines.push("  " + a[k]);
-//	    else {
-//	      if (k < a.length) lines.push("- " + a[k]);
-//	      if (k < e.length) lines.push("+ " + e[k]);
-//	    }
-//	  }
-//	  return `First difference around line ${idx + 1}:\n${lines.join("\n")}`;
-//	}
-//	const cases = [["a\nb\nc", "a\nb\nc"], ["X\nb\nc", "a\nb\nc"], /* ... */];
-//	for (const [actual, expected] of cases) {
-//	  console.log(JSON.stringify(firstDiffExcerpt(actual, expected)));
-//	}
-
-// diffJSCases pins Go firstDiffExcerpt output against the JS reference
-// implementation. Each entry is an (actual, expected) pair together with the
-// JS firstDiffExcerpt output for that pair.
-var diffJSCases = []struct{ actual, expected, want string }{
+// firstDiffExcerptCases pins firstDiffExcerpt's exact output — including the
+// "First difference around line N" wording, the two-line context window, and
+// the "  "/"- "/"+ " line prefixes — as golden values. These are not derived
+// from any formula in the test; they're the literal expected rendering, so a
+// change to any of them means the excerpt format changed and the fixture
+// suite (and any tooling that parses --check output) would need updating.
+var firstDiffExcerptCases = []struct{ actual, expected, want string }{
 	{"a\nb\nc", "a\nb\nc", "First difference around line 4:\n  b\n  c"},
 	{"X\nb\nc", "a\nb\nc", "First difference around line 1:\n- X\n+ a\n  b\n  c"},
 	{"a\nb\nZZZ\nd\ne", "a\nb\nc\nd\ne", "First difference around line 3:\n  a\n  b\n- ZZZ\n+ c\n  d\n  e"},
@@ -205,9 +169,9 @@ var diffJSCases = []struct{ actual, expected, want string }{
 	{"z\nz\nz\nz\nz\nz\nz\nz\nz\nz", "y\ny\ny", "First difference around line 1:\n- z\n+ y\n- z\n+ y\n- z\n+ y"},
 }
 
-func TestFirstDiffExcerptMatchesJS(t *testing.T) {
+func TestFirstDiffExcerpt(t *testing.T) {
 	t.Parallel()
-	for _, c := range diffJSCases {
+	for _, c := range firstDiffExcerptCases {
 		c := c
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
@@ -219,14 +183,12 @@ func TestFirstDiffExcerptMatchesJS(t *testing.T) {
 	}
 }
 
-// assembleTrimJSCases pins the JS assembleOutput's trailing-newline
-// normalization (`(prefix).replace(/\n*$/, "\n")`) against Go's
-// strings.TrimRight(prefix, "\n") + "\n" directly on a battery of raw
-// "banner\n\ncontent" strings, independent of the (deliberately different)
-// banner text. Captured from the JS reference by evaluating
-// `renderBanner() + "\n\n" + content` through `.replace(/\n*$/, "\n")` for
-// each content value below.
-var assembleTrimJSCases = []struct{ content, wantTail string }{
+// assembleTrailingNewlineCases pins Assemble's trailing-newline normalization
+// on a battery of content values — empty, all-newline, no trailing newline,
+// and many trailing newlines — independent of the (unrelated) banner text.
+// Each wantTail is what the assembled "banner\n\ncontent" string must end
+// with once normalized to exactly one trailing newline.
+var assembleTrailingNewlineCases = []struct{ content, wantTail string }{
 	{"", "\n"},
 	{"\n", "\n"},
 	{"\n\n\n", "\n"},
@@ -239,42 +201,23 @@ var assembleTrimJSCases = []struct{ content, wantTail string }{
 	{"a\nb\nc", "\na\nb\nc\n"},
 }
 
-// trailingNewlineRunRe mirrors the JS regex /\n*$/ used by assembleOutput.
-var trailingNewlineRunRe = regexp.MustCompile(`\n*$`)
-
-// jsReplaceTrailingNewlines reproduces JS's `s.replace(/\n*$/, "\n")` exactly:
-// replace the (possibly empty) maximal trailing run of "\n" with a single "\n".
-func jsReplaceTrailingNewlines(s string) string {
-	loc := trailingNewlineRunRe.FindStringIndex(s)
-	return s[:loc[0]] + "\n"
-}
-
-// TestAssembleMatchesJS verifies, on every case, that Go's
-// strings.TrimRight(s, "\n") + "\n" (what Assemble uses) and a direct
-// translation of the JS regex replace/\n*$/ produce byte-identical results,
-// for a battery of banner+content combinations including empty content,
-// all-newline content, content with no trailing newline, and content with
-// many trailing newlines.
-func TestAssembleMatchesJS(t *testing.T) {
+// TestAssembleTrailingNewline verifies, for every case, that Assemble collapses
+// however many trailing newlines are present in banner+content down to
+// exactly one, regardless of whether content is empty, all newlines, missing
+// a trailing newline, or has several.
+func TestAssembleTrailingNewline(t *testing.T) {
 	t.Parallel()
 	const banner = "> [!IMPORTANT]\n...banner..."
-	for _, c := range assembleTrimJSCases {
+	for _, c := range assembleTrailingNewlineCases {
 		c := c
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
-			raw := banner + "\n\n" + c.content
-			goResult := strings.TrimRight(raw, "\n") + "\n"
-			jsResult := jsReplaceTrailingNewlines(raw)
-			if goResult != jsResult {
-				t.Errorf("content %q: TrimRight-based result diverges from JS replace(/\\n*$/,\"\\n\") result\nGo:  %q\nJS:  %q", c.content, goResult, jsResult)
+			got := Assemble(banner, c.content)
+			if !strings.HasSuffix(got, c.wantTail) {
+				t.Errorf("Assemble(banner, %q) = %q, want suffix %q", c.content, got, c.wantTail)
 			}
-			if !strings.HasSuffix(goResult, c.wantTail) {
-				t.Errorf("content %q: result %q does not end with expected tail %q", c.content, goResult, c.wantTail)
-			}
-			// Also exercise the real Assemble function to confirm it matches the
-			// same trim-based computation for this banner/content pair.
-			if got := Assemble(banner, c.content); got != goResult {
-				t.Errorf("Assemble(%q, %q) = %q, want %q", banner, c.content, got, goResult)
+			if strings.HasSuffix(got, "\n\n") {
+				t.Errorf("Assemble(banner, %q) = %q, has more than one trailing newline", c.content, got)
 			}
 		})
 	}

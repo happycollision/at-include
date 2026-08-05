@@ -9,10 +9,9 @@ import (
 // output. It names the source file and the command that regenerates it, and
 // tells agents to edit the source instead of the generated file.
 //
-// This is a deliberate generalization of the JS spec's renderBanner(), which
-// hardcodes "AGENTS.src.md"/"AGENTS.md" and the "node scripts/build-agents.mjs"
-// command. Everything else — the callout shape, wording, and the "If you are
-// an agent" rule — matches the JS verbatim.
+// The source/output names and the regenerate command are parameterized on
+// opts rather than hardcoded, so the same banner shape works for any
+// --src/--out pair, not just the default AGENTS.src.md/AGENTS.md.
 func Banner(opts Options) string {
 	src, out := opts.srcName(), opts.outName()
 	return strings.Join([]string{
@@ -31,21 +30,14 @@ func Banner(opts Options) string {
 // Assemble joins the banner and flattened content and normalizes the trailing
 // newline run to exactly one.
 //
-// Matches the JS assembleOutput():
+// strings.TrimRight(s, "\n") strips however many trailing newlines are
+// present (including zero), so appending "\n" afterward always leaves exactly
+// one, for every input: empty content, content that is all newlines, and
+// content with no trailing newline all end up the same way.
 //
-//	const assembled = renderBanner() + "\n\n" + content;
-//	return assembled.replace(/\n*$/, "\n");
-//
-// strings.TrimRight(s, "\n") strips the same maximal trailing run of "\n"
-// that the JS regex /\n*$/ matches (both operate on "however many trailing
-// newlines are present, including zero"), so appending "\n" after TrimRight
-// reproduces replace(/\n*$/, "\n") for every input, including empty content,
-// content that is all newlines, and content with no trailing newline. Verified
-// differentially against the JS (see check_test.go's TestAssembleMatchesJS).
-//
-// The normalization is applied to the combined text rather than to content
-// alone, so the single-trailing-newline invariant holds even when content is
-// empty or consists only of newlines.
+// The normalization is applied to the combined banner+content text rather
+// than to content alone, so the single-trailing-newline invariant holds even
+// when content itself is empty or consists only of newlines.
 func Assemble(banner, content string) string {
 	return strings.TrimRight(banner+"\n\n"+content, "\n") + "\n"
 }

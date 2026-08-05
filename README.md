@@ -265,9 +265,3 @@ The black-box CLI test suite lives under [`test/`](test/README.md); the case
 directories in [`test/cases/`](test/cases) are plain data (a `cmd` file, an
 input `files/` tree, and `expect/*` files) — adding a test case means adding a
 directory, not writing Go.
-
-## Credit
-
-`at-include` is a Go port of `scripts/build-agents.mjs` from the
-`app-variants` project, generalized from that project's specific
-`AGENTS.src.md` convention into a standalone, general-purpose tool.

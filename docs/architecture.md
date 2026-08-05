@@ -3,7 +3,7 @@
 ```
 cmd/at-include        thin main: argv/env in, cli.Run's exit code out
 internal/cli          flag parsing, exit codes, usage text (cli.go)
-internal/flatten       the actual port of build-agents.mjs
+internal/flatten       the @path scan/expand/check logic
   scan.go              fence/inline-code state machine + FindImports
                         (used by --list-imports, not by expansion itself)
   expand.go            the recursive expander (Flatten/Options/expander)

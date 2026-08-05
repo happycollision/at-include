@@ -84,8 +84,9 @@ func (e *usageError) Unwrap() error { return e.err }
 
 // Run parses argv (excluding the program name), performs the requested
 // action, and returns the process exit code. Relative --src/--out/--root
-// values resolve against the process's current working directory, mirroring
-// the JS's process.cwd()-relative resolution.
+// values resolve against the process's current working directory, so the
+// same command behaves the same way regardless of where it's invoked from
+// within a repo.
 func Run(argv []string, stdout, stderr io.Writer) int {
 	opts, err := parseArgs(argv)
 	if err != nil {
