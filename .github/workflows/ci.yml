@@ -15,15 +15,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # Windows is included per the "if it is just easy" ask: the fixture
-    # harness (test/cli_test.go) already has Windows-specific handling
-    # (isWindows(), the appended ".exe" suffix), and .gitattributes marks
-    # test/cases/** -text so fixture bytes checkout unmodified (no CRLF
-    # rewriting) on every OS. That said, this has never actually been run on
-    # Windows, so a real Windows-only failure (e.g. a path-separator or
-    # line-ending edge case the porting effort missed) shouldn't block
-    # Linux/macOS merges while it's being triaged for the first time.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    # Windows is a fully gating leg: the fixture harness (test/cli_test.go)
+    # handles it (isWindows(), the appended ".exe" suffix), .gitattributes
+    # marks test/cases/** -text so fixture bytes check out unmodified, and the
+    # whole suite — lint, unit tests, and all fixture cases driving the real
+    # binary — has been verified green on windows-latest.
     steps:
       - uses: actions/checkout@v4
 
