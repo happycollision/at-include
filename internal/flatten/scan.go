@@ -78,7 +78,7 @@ func fenceDelim(line string) (char byte, runLen int, ok bool) {
 // trimLeftJSSpace strips leading runes matching jsIsSpace, mirroring JS
 // String.prototype.trimStart() (which strips the same Unicode \s set).
 func trimLeftJSSpace(s string) string {
-	for len(s) > 0 {
+	for s != "" {
 		r, size := utf8.DecodeRuneInString(s)
 		if !jsIsSpace(r) {
 			break

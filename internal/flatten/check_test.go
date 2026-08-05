@@ -144,8 +144,31 @@ func TestCheckMissingOutputIsStaleNotAnError(t *testing.T) {
 // The JS build-agents.mjs firstDiffExcerpt/assembleOutput are not exported, so
 // these cases were captured by copying both functions verbatim into a scratch
 // .mjs (unchanged) and running it under node against a battery of
-// (actual, expected) / content inputs. See the task report for the exact
-// script. Each want value below is the JS output captured byte-for-byte.
+// (actual, expected) / content inputs. Each want value below is the JS output
+// captured byte-for-byte, via a script of this shape:
+//
+//	function firstDiffExcerpt(actual, expected) {
+//	  const a = actual.split("\n");
+//	  const e = expected.split("\n");
+//	  const n = Math.max(a.length, e.length);
+//	  let idx = 0;
+//	  while (idx < n && a[idx] === e[idx]) idx++;
+//	  const ctx = 2;
+//	  const start = Math.max(0, idx - ctx);
+//	  const lines = [];
+//	  for (let k = start; k <= idx + ctx && k < n; k++) {
+//	    if (a[k] === e[k]) lines.push("  " + a[k]);
+//	    else {
+//	      if (k < a.length) lines.push("- " + a[k]);
+//	      if (k < e.length) lines.push("+ " + e[k]);
+//	    }
+//	  }
+//	  return `First difference around line ${idx + 1}:\n${lines.join("\n")}`;
+//	}
+//	const cases = [["a\nb\nc", "a\nb\nc"], ["X\nb\nc", "a\nb\nc"], /* ... */];
+//	for (const [actual, expected] of cases) {
+//	  console.log(JSON.stringify(firstDiffExcerpt(actual, expected)));
+//	}
 
 // diffJSCases pins Go firstDiffExcerpt output against the JS reference
 // implementation. Each entry is an (actual, expected) pair together with the

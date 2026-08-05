@@ -14,13 +14,7 @@ import (
 // command. Everything else — the callout shape, wording, and the "If you are
 // an agent" rule — matches the JS verbatim.
 func Banner(opts Options) string {
-	src, out := opts.SrcName, opts.OutName
-	if src == "" {
-		src = "AGENTS.src.md"
-	}
-	if out == "" {
-		out = "AGENTS.md"
-	}
+	src, out := opts.srcName(), opts.outName()
 	return strings.Join([]string{
 		"> [!IMPORTANT]",
 		"> **This file is generated. Do not edit it directly — edits here will be",

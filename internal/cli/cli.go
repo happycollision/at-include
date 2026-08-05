@@ -5,9 +5,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,7 +16,16 @@ import (
 	"github.com/happycollision/at-include/internal/flatten"
 )
 
-// Version is overridden at build time with -ldflags "-X ...cli.Version=v1.2.3".
+// Version is overridden at build time by linking with:
+//
+//	-ldflags "-X github.com/happycollision/at-include/internal/cli.Version=v1.2.3"
+//
+// This is the ONE injection point: mise.toml's build task uses this exact
+// -X path, and Task 8's goreleaser config must use the same path (there is
+// no second copy of the version string anywhere else in the program — in
+// particular, cmd/at-include/main.go does NOT declare its own `version`
+// variable to copy into this one, precisely so there is only one place that
+// can go stale relative to the other).
 var Version = "dev"
 
 const (
@@ -48,18 +57,30 @@ Exit codes: 0 success, 1 out-of-date or runtime error, 2 usage error.
 // options holds the parsed command line, before paths are resolved against a
 // working directory.
 type options struct {
-	check       bool
-	help        bool
-	version     bool
-	listImports bool
-	src         string
-	out         string
-	root        string
-	rootSet     bool
-	markerDesc  string
-	maxDepth    int
-	maxDepthSet bool
+	check         bool
+	help          bool
+	version       bool
+	listImports   bool
+	src           string
+	out           string
+	root          string
+	rootSet       bool
+	markerDesc    string
+	markerDescSet bool
+	maxDepth      int
+	maxDepthSet   bool
 }
+
+// usageError marks a resolveOptions failure as a usage error (bad flag
+// combination, detectable before doing any work) rather than a runtime error
+// (something that went wrong while acting on otherwise-valid flags). Run maps
+// this to exit code 2, matching the same code parseArgs failures already use,
+// since both are "the invocation itself is wrong" rather than "the invocation
+// was fine but something failed while executing it".
+type usageError struct{ err error }
+
+func (e *usageError) Error() string { return e.err.Error() }
+func (e *usageError) Unwrap() error { return e.err }
 
 // Run parses argv (excluding the program name), performs the requested
 // action, and returns the process exit code. Relative --src/--out/--root
@@ -82,6 +103,11 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 
 	fOpts, err := resolveOptions(opts)
 	if err != nil {
+		var uerr *usageError
+		if errors.As(err, &uerr) {
+			fprintf(stderr, "at-include: %s\n\n%s", err, usage)
+			return 2
+		}
 		fprintf(stderr, "at-include: %s\n", err)
 		return 1
 	}
@@ -90,7 +116,7 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 	case opts.listImports:
 		return runListImports(fOpts, stdout, stderr)
 	case opts.check:
-		return runCheck(fOpts, stdout, stderr)
+		return runCheck(opts, fOpts, stdout, stderr)
 	default:
 		return runGenerate(fOpts, stdout, stderr)
 	}
@@ -105,6 +131,11 @@ func resolveOptions(o options) (flatten.Options, error) {
 	out, err := filepath.Abs(o.out)
 	if err != nil {
 		return flatten.Options{}, err
+	}
+	if samePath(src, out) {
+		return flatten.Options{}, &usageError{fmt.Errorf(
+			"--out must not be the same file as --src (both resolve to %s); "+
+				"this would overwrite the hand-authored source", filepath.Clean(src))}
 	}
 	root := filepath.Dir(src)
 	if o.rootSet {
@@ -122,6 +153,32 @@ func resolveOptions(o options) (flatten.Options, error) {
 		SrcName:     displayName(root, src, o.src),
 		OutName:     displayName(root, out, o.out),
 	}, nil
+}
+
+// samePath reports whether two absolute paths name the same file on disk.
+//
+// The baseline comparison is on filepath.Clean'd paths, which already catches
+// the common cases (identical paths, "./AGENTS.src.md" vs "AGENTS.src.md",
+// redundant "." / ".." segments). We go one step further and try
+// filepath.EvalSymlinks on both sides so that a symlink pointing at the other
+// path is also caught (e.g. --out a-symlink-to-AGENTS.src.md).
+//
+// EvalSymlinks errors on a path that doesn't exist, which is expected and
+// common here: --out legitimately may not exist yet (the normal "first run"
+// case). So a failure to resolve either side via EvalSymlinks is treated as
+// "no additional information" and we fall back to the Clean'd comparison
+// instead of propagating the error — this function only needs to decide
+// same-or-not, never to fail the whole resolve over a missing --out file.
+func samePath(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return ra == rb
 }
 
 // displayName prefers the path relative to root (forward slashes) so banners
@@ -172,7 +229,7 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func runCheck(fOpts flatten.Options, stdout, stderr io.Writer) int {
+func runCheck(opts options, fOpts flatten.Options, stdout, stderr io.Writer) int {
 	res, err := flatten.Check(fOpts)
 	if err != nil {
 		fprintf(stderr, "at-include: %s\n", err)
@@ -182,7 +239,7 @@ func runCheck(fOpts flatten.Options, stdout, stderr io.Writer) int {
 		fprintf(stdout, "%s is up to date.\n", fOpts.OutName)
 		return 0
 	}
-	fprintf(stdout, "%s is out of date. Run: %s\n", fOpts.OutName, regenCommand(fOpts))
+	fprintf(stdout, "%s is out of date. Run: %s\n", fOpts.OutName, regenCommand(opts))
 	if res.DiffExcerpt != "" {
 		fprintf(stdout, "%s\n", res.DiffExcerpt)
 	}
@@ -218,48 +275,71 @@ func fprintf(w io.Writer, format string, a ...any) {
 	_, _ = fmt.Fprintf(w, format, a...)
 }
 
-// regenCommand renders the command that would regenerate fOpts.OutName from
-// fOpts.SrcName, for the "out of date" message.
+// regenCommand renders the command that would regenerate the output file, for
+// the "out of date" message.
 //
-// It always names the *resolved* --src/--out/--root/--marker-desc/--max-depth
-// this run actually used (via fOpts, which already reflects fOpts.SrcName's
-// display form and so on) rather than echoing back the caller's raw argv.
-// Echoing raw argv back (as an earlier draft did) has two problems: (1) it
-// under-reports whenever a flag's value happens to equal that flag's default
-// — e.g. `--marker-desc ""` is indistinguishable from "not passed" if the
-// check is `markerDesc != ""` — and (2) whatever we print has to be
-// shell-quoted correctly for values containing spaces or quotes, which is one
-// more way to print a subtly wrong command. Since this function only runs
-// after resolveOptions has already computed fOpts, it always reflects the
-// actual configuration of this run, and only needs to quote values it prints.
-func regenCommand(fOpts flatten.Options) string {
+// It builds the suggestion from opts — the parsed, CWD-relative command line
+// the user actually typed — rather than from the resolved flatten.Options
+// display names. Those display names are root-relative (for banners and
+// inline markers, which must read the same regardless of the caller's CWD),
+// but the user is going to paste this command into a shell sitting in their
+// CWD, not in root. Building the suggestion from root-relative names is wrong
+// in two ways: it prints the wrong path whenever CWD and root differ (e.g.
+// `--src docs/AGENTS.src.md` sitting under a root of "." would display as the
+// root-relative "AGENTS.src.md", silently collapsing to the default and
+// pointing at a different file entirely), and it drops --root altogether
+// (root-relative names never mention root, so a caller running with
+// `--root .` would get a suggestion missing --root, which then resolves
+// markers against a different root and fails --check all over again).
+//
+// So: echo back opts's typed values, comparing each against its default to
+// decide whether to include the flag at all. This does under-report one
+// synthetic edge case symmetrically with the JS-parity note above: a
+// `--marker-desc ""` that is passed explicitly is indistinguishable in the
+// printed command from "not passed" UNLESS we consult markerDescSet, which we
+// do (see below) — so that case is in fact handled correctly, unlike an
+// earlier draft that only compared against "".
+func regenCommand(opts options) string {
 	parts := []string{"at-include"}
-	if fOpts.SrcName != defaultSrc {
-		parts = append(parts, "--src", quoteArg(fOpts.SrcName))
+	if opts.src != defaultSrc {
+		parts = append(parts, "--src", shellQuote(opts.src))
 	}
-	if fOpts.OutName != defaultOut {
-		parts = append(parts, "--out", quoteArg(fOpts.OutName))
+	if opts.out != defaultOut {
+		parts = append(parts, "--out", shellQuote(opts.out))
 	}
-	if fOpts.MaxDepthSet {
-		parts = append(parts, "--max-depth", strconv.Itoa(fOpts.MaxDepth))
+	if opts.rootSet {
+		parts = append(parts, "--root", shellQuote(opts.root))
 	}
-	if fOpts.MarkerDesc != "" {
-		parts = append(parts, "--marker-desc", quoteArg(fOpts.MarkerDesc))
+	if opts.maxDepthSet {
+		parts = append(parts, "--max-depth", strconv.Itoa(opts.maxDepth))
+	}
+	if opts.markerDescSet {
+		parts = append(parts, "--marker-desc", shellQuote(opts.markerDesc))
 	}
 	return strings.Join(parts, " ")
 }
 
-// quoteArg wraps a value in double quotes whenever it contains characters
-// that would otherwise split it into multiple shell words. This is a display
-// aid for the "Run: ..." message, not a real shell-escaping routine — it does
-// not need to handle embedded double quotes specially, because it exists only
-// to make the common case (a path with spaces) copy-pasteable, not to
-// guarantee round-tripping of arbitrary strings.
-func quoteArg(s string) string {
-	if s != "" && !strings.ContainsAny(s, " \t\"'$`\\") {
+// shellQuote renders s as a single POSIX shell word, always via single-quote
+// escaping: wrap in '...', turning each embedded single quote into the
+// four-character sequence '\” (close quote, escaped literal quote, reopen
+// quote). Unlike double-quoting, single-quote escaping has no live
+// metacharacters inside the
+// quotes at all — no $expansion, no `command` substitution, no !history
+// expansion, no \escapes — so every character of s round-trips literally
+// through a POSIX shell. This makes the printed "Run: ..." command not just
+// display-plausible but actually safe to paste and run, which matters because
+// arbitrary --marker-desc/--src/--out text (attacker- or accident-supplied)
+// can contain "$", backticks, or "!" that a double-quoted rendering would
+// still let the shell interpret.
+//
+// Values with no special characters are printed bare for readability; this is
+// a cosmetic-only shortcut; POSIX single-quoting would also be correct (if
+// slightly noisier) for those values.
+func shellQuote(s string) string {
+	if s != "" && !strings.ContainsAny(s, " \t\n\"'$`\\!*?[]{}()<>|&;~#%") {
 		return s
 	}
-	return strconv.Quote(s)
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func parseArgs(argv []string) (options, error) {
@@ -297,7 +377,7 @@ func parseArgs(argv []string) (options, error) {
 			if err != nil {
 				return o, err
 			}
-			o.markerDesc = v
+			o.markerDesc, o.markerDescSet = v, true
 		case "--max-depth":
 			var raw string
 			if i+1 < len(argv) {
@@ -323,111 +403,4 @@ func value(argv []string, i *int, flagName string) (string, error) {
 	}
 	*i++
 	return argv[*i], nil
-}
-
-// parseNonNegativeIntJS parses raw the way the JS CLI's --max-depth validation
-// does:
-//
-//	const n = v === undefined || v.trim() === "" ? NaN : Number(v);
-//	if (!Number.isInteger(n) || n < 0) { ... error ... }
-//
-// JS Number() accepts a much wider grammar than strconv.Atoi: surrounding
-// whitespace, a leading "+", decimal points that round-trip to an integer
-// ("3.0", "3."), scientific notation ("1e2"), and unsigned hex/octal/binary
-// prefixes ("0x10", "0o17", "0b101"). This function reproduces all of that
-// (verified against a Node repl for every case in the table in cli_test.go's
-// TestParseNonNegativeIntJS, plus the doc comment's own worked examples), with
-// one deliberate, narrow divergence documented below.
-//
-// Deliberate divergences from real Number() semantics:
-//   - "-0x1", "+0b1": JS Number() rejects a sign in front of a 0x/0o/0b
-//     prefix (Number("-0x1") is NaN — the sign-then-radix-prefix combination
-//     isn't part of the StringNumericLiteral grammar at all, only inside
-//     actual JS source as `-` applied to a numeric literal). This function
-//     also rejects a signed prefixed literal, so behavior matches; this isn't
-//     actually a divergence, but is called out because it was tempting to
-//     "fix" by allowing the sign, which would NOT match the JS.
-//   - "1_000": JS Number() rejects numeric separators outright (they're only
-//     legal in source-code numeric literals, not in Number()'s string
-//     grammar). Go's strconv.ParseFloat/ParseInt, by contrast, both accept
-//     underscore digit separators (matching Go's own numeric-literal syntax),
-//     so parseJSNumber explicitly rejects any '_' before delegating to them —
-//     without that guard this function would wrongly accept "1_000".
-//   - Whitespace trimmed here is ASCII-only (strings.TrimSpace's Unicode set,
-//     specifically); JS's String.prototype.trim() strips the same broader
-//     \s-plus-line-terminator set as scan.go's jsIsSpace. A --max-depth value
-//     padded with, say, a non-breaking space is vanishingly unlikely in
-//     practice for a CLI integer flag, so this narrow gap is accepted rather
-//     than pulling jsIsSpace's trimming into this unrelated parser.
-func parseNonNegativeIntJS(raw string) (int, bool) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return 0, false
-	}
-
-	f, ok := parseJSNumber(trimmed)
-	if !ok || math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0, false
-	}
-	if f != math.Trunc(f) || f < 0 {
-		return 0, false
-	}
-	// f is a non-negative integer value; guard against magnitudes that would
-	// overflow int (the JS side has no such limit, but a --max-depth this
-	// large is not meaningful and int is what the rest of the Go code uses).
-	if f > math.MaxInt32 {
-		return 0, false
-	}
-	return int(f), true
-}
-
-// parseJSNumber parses a (pre-trimmed, non-empty) numeric string the way JS's
-// Number(string) does for the forms --max-depth actually needs: signed
-// decimal integers, decimals with a trailing/leading '.', scientific
-// notation, and unsigned 0x/0o/0b-prefixed integers.
-func parseJSNumber(s string) (float64, bool) {
-	// Go's strconv.ParseFloat/ParseInt both accept '_' digit separators
-	// (Go's own numeric-literal syntax); JS Number() does not accept them
-	// under any circumstance. Reject up front so "1_000" doesn't silently
-	// parse as 1000.
-	if strings.ContainsRune(s, '_') {
-		return 0, false
-	}
-	if hasUnsignedRadixPrefix(s) {
-		n, err := strconv.ParseInt(s, 0, 64)
-		if err != nil {
-			return 0, false
-		}
-		return float64(n), true
-	}
-	// strconv.ParseFloat already matches Number()'s decimal/scientific/
-	// Infinity/NaN grammar closely enough for this CLI's purposes: both
-	// accept an optional leading sign, digits, a decimal point in any
-	// position ("3.", ".5"), and an exponent; both parse "Infinity"/"NaN".
-	// It also accepts a Go-only hex-float form ("0x1p10") that JS would
-	// reject, but that isn't reachable here: hasUnsignedRadixPrefix already
-	// routed any "0x..."/"0X..." input through ParseInt above, so a hex-float
-	// literal reaches ParseFloat only if it lacks the "0x" prefix, which is
-	// impossible for that syntax. So no separate guard is needed for it.
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0, false
-	}
-	return f, true
-}
-
-// hasUnsignedRadixPrefix reports whether s looks like an (unsigned) 0x/0o/0b
-// integer literal. JS Number() only recognizes these prefixes without a sign;
-// "-0x10" and "+0b1" are NaN in JS, so a leading sign here is deliberately
-// excluded rather than handled.
-func hasUnsignedRadixPrefix(s string) bool {
-	if len(s) < 3 || s[0] != '0' {
-		return false
-	}
-	switch s[1] {
-	case 'x', 'X', 'o', 'O', 'b', 'B':
-		return true
-	default:
-		return false
-	}
 }

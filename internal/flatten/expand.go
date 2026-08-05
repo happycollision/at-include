@@ -36,6 +36,34 @@ func (o Options) markerDesc() string {
 	return o.MarkerDesc
 }
 
+// defaultSrcName and defaultOutName are the same fallback display names
+// cli.go's defaultSrc/defaultOut constants use. They are duplicated here
+// (rather than imported, which would invert the cli->flatten dependency)
+// because Options is a flatten type and must be able to default its own
+// display names without depending on the cli package.
+const (
+	defaultSrcName = "AGENTS.src.md"
+	defaultOutName = "AGENTS.md"
+)
+
+// srcName returns o.SrcName, defaulting to "AGENTS.src.md" when unset, so
+// callers that render Options for display (Banner) never need to duplicate
+// that default themselves.
+func (o Options) srcName() string {
+	if o.SrcName == "" {
+		return defaultSrcName
+	}
+	return o.SrcName
+}
+
+// outName is srcName's counterpart for OutName.
+func (o Options) outName() string {
+	if o.OutName == "" {
+		return defaultOutName
+	}
+	return o.OutName
+}
+
 // expander carries the state that must be shared across the whole recursive
 // walk: which files have already been inlined in full, and how many were.
 //
@@ -192,7 +220,15 @@ func (e *expander) tryExpandToken(token, importerDir string, stack []string, imp
 	// this tool's entire purpose (mirrors JS existsSync/statSync on abs).
 	info, statErr := os.Stat(abs)
 	if statErr != nil || !info.Mode().IsRegular() {
-		return "", false, nil // unresolvable or not a file: literal text, never an error
+		// Deliberately swallowing statErr here (rather than returning it) is JS
+		// semantics, not an oversight: the JS spec treats "the token doesn't
+		// resolve to a file" (whether because it doesn't exist, a parent
+		// directory in the path doesn't exist, or a permission error prevents
+		// stat'ing it) as "leave the @token as literal text", never as a hard
+		// failure of the whole run. So every os.Stat error here — not just
+		// os.ErrNotExist — is folded into the same "unresolvable" outcome.
+		//nolint:nilerr // statErr is intentionally discarded: unresolvable token -> literal text, per JS spec.
+		return "", false, nil
 	}
 
 	rootRel := e.toRootRel(abs)

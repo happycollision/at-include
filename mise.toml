@@ -11,7 +11,10 @@ GOTOOLCHAIN = "local"
 
 [tasks.build]
 description = "Build the at-include binary into ./dist"
-run = "go build -trimpath -ldflags \"-s -w -X main.version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)\" -o dist/at-include ./cmd/at-include"
+# The -X path here is the one, canonical version-injection point (see the doc
+# comment on cli.Version in internal/cli/cli.go) — Task 8's goreleaser config
+# must use this same path.
+run = "go build -trimpath -ldflags \"-s -w -X github.com/happycollision/at-include/internal/cli.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)\" -o dist/at-include ./cmd/at-include"
 
 [tasks.test]
 description = "Run all tests (unit + fixture CLI suite)"
