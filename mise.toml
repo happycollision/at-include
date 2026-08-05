@@ -6,7 +6,7 @@ goreleaser = "2.17.1"
 lefthook = "2.1.10"
 
 [env]
-# Keep tool-installed binaries on PATH for `go run`-installed helpers.
+# Prevent Go from auto-downloading a different toolchain than the one pinned above.
 GOTOOLCHAIN = "local"
 
 [tasks.build]
@@ -44,5 +44,4 @@ run = [
 [tasks.ci]
 description = "Alias for check"
 depends = ["check"]
-run = "echo ok"
 
