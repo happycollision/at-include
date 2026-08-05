@@ -47,8 +47,15 @@ pre-commit:
     # have no dist/at-include yet. `go run` builds-and-runs from source on
     # demand, so the hook works right after clone with no separate build
     # step, at the cost of a fraction of a second of compile time per commit.
+    # examples/consumer-smoke-test/ has its own AGENTS.src.md, and the glob is
+    # matched against the basename, so it would match there too and regenerate
+    # the *root* AGENTS.md off an unrelated edit. `exclude` scopes it back to
+    # this repo's own docs. (Anchoring the glob as "./AGENTS.src.md" does NOT
+    # work — it silently matches nothing, disabling the job.)
     - name: agents-build
       glob: "{AGENTS.src.md,docs/conventions.md}"
+      exclude:
+        - "examples/**"
       run: go run ./cmd/at-include
       stage_fixed: true
 
