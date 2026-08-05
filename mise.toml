@@ -48,3 +48,13 @@ run = [
 description = "Alias for check"
 depends = ["check"]
 
+[tasks.docs]
+description = "Regenerate AGENTS.md from AGENTS.src.md (dogfoods at-include on this repo)"
+depends = ["build"]
+run = "./dist/at-include"
+
+[tasks."docs:check"]
+description = "Verify AGENTS.md is up to date (CI gate, dogfoods at-include on this repo)"
+depends = ["build"]
+run = "./dist/at-include --check"
+

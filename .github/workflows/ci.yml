@@ -46,3 +46,15 @@ jobs:
       - name: Build release-shaped binary
         run: mise run build
         shell: bash
+
+      # Dogfooding: this repo's own AGENTS.md is generated from AGENTS.src.md
+      # by at-include itself. This step fails the job if someone edited
+      # AGENTS.src.md (or docs/conventions.md, which it imports) without
+      # regenerating AGENTS.md. Runs the just-built binary from the previous
+      # step (via the docs:check task) rather than a separate install, and
+      # `shell: bash` is available on every matrix leg including
+      # windows-latest (which ships Git Bash), so this needs no OS-specific
+      # branching or scoping like the fixture suite's isWindows() handling.
+      - name: Verify AGENTS.md is up to date
+        run: mise run docs:check
+        shell: bash

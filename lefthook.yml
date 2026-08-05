@@ -28,6 +28,30 @@ pre-commit:
       run: gofumpt -l -w {staged_files}
       stage_fixed: true
 
+    # Dogfooding: regenerate this repo's own AGENTS.md whenever AGENTS.src.md
+    # or one of its imports (currently just docs/conventions.md) changes.
+    # `stage_fixed: true` stages the regenerated AGENTS.md so it joins the
+    # same commit instead of failing the commit over a stale file.
+    #
+    # This runs after gofumpt and before the lint/test group, on its own line
+    # (not folded into the parallel group below) for the same reason gofumpt
+    # itself isn't: it writes to a file on disk (AGENTS.md) that a concurrent
+    # job could conceivably read (e.g. a future job that greps docs), so it
+    # stays part of the sequential, mutation-only phase rather than being
+    # added to the read-only parallel group — avoiding the same
+    # gofumpt-mutation race this file already calls out above.
+    #
+    # Uses `go run ./cmd/at-include` rather than `dist/at-include`: dist/ is
+    # gitignored and only exists after someone has run `mise run build`, so a
+    # fresh clone that runs `lefthook install` and immediately commits would
+    # have no dist/at-include yet. `go run` builds-and-runs from source on
+    # demand, so the hook works right after clone with no separate build
+    # step, at the cost of a fraction of a second of compile time per commit.
+    - name: agents-build
+      glob: "{AGENTS.src.md,docs/conventions.md}"
+      run: go run ./cmd/at-include
+      stage_fixed: true
+
     - group:
         parallel: true
         jobs:
