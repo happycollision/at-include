@@ -1,0 +1,18 @@
+# Build output
+/dist/
+/at-include
+/bin/
+
+# Go
+*.test
+*.out
+coverage.txt
+
+# Planning artifacts (ephemeral — specs are tracked, plans are not)
+/docs/superpowers/plans/
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
