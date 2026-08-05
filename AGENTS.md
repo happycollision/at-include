@@ -14,12 +14,17 @@
 project. It flattens `@<path>` Markdown imports the way Claude Code inlines
 `@`-referenced files from a `CLAUDE.md`.
 
-**Exact JS behavioral fidelity is the top priority of this codebase** — more
-important than Go idiom. When the two pull in different directions, match the
-JS. Deliberate divergences from the JS exist and are documented inline as
-comments at the point of divergence (for example, the generalized banner
-wording, or accepted differences in invalid-UTF-8 handling) — read the comment
-before assuming a difference is a bug.
+**Happy-path output compatibility with the original JS is what matters** —
+the generated file's content (banner, `Contents of X (...)` markers, blank-line
+placement, single trailing newline, inline-once/cycle behavior) must not
+change. Internal implementation is ordinary, idiomatic Go; the JS is a
+historical reference for behavior, not an ongoing constraint on how the Go
+code is written. Deliberate, user-visible divergences from the JS exist and
+are documented inline as comments at the point of divergence (for example,
+the generalized banner wording) — read the comment before assuming a
+difference is a bug.
+
+Contents of docs/architecture.md (project instructions, checked into the codebase):
 
 ## Architecture
 
@@ -40,66 +45,21 @@ codes, and all user-facing text belong in `internal/cli`. All import-flattening
 logic belongs in `internal/flatten` and should have no knowledge of flags or
 exit codes.
 
-Within `internal/flatten`, note the deliberate asymmetry between `scan.go`'s
-`FindImports` (strips inline code spans before scanning for `@tokens`,
-matching JS `findImports`) and `expand.go`'s `transformLine` (does NOT strip
-code spans first — it scans the raw line, so a `` ` `` inside an `@token`
-during expansion is just a non-whitespace character). The two functions are
-allowed to disagree on the same input; this is intentional and matches the JS,
-which has the same asymmetry between its own `findImports` and
-`transformLine`. Don't "fix" this by unifying the two scanners.
+`scan.go`'s `FindImports` (used by `--list-imports`) and `expand.go`'s
+expander share one token-scanning rule: an `@token` runs from the `@` to the
+next whitespace character, full stop — see `transformLine`'s doc comment for
+the exact rule. Fenced code blocks are skipped entirely by both, and inline
+code spans are left verbatim during expansion; what a `@token` sitting right
+next to a backtick means is governed by the same scan in both places, so
+`--list-imports` always reports exactly the tokens the expander would
+consider.
+
 
 ## Conventions this codebase actually follows
 
-The conventions below are verified against the code, not assumed — see the
-cited files if you want to check them yourself.
-
-Contents of docs/conventions.md (project instructions, checked into the codebase):
-
-## Testing and porting conventions
-
-- **Fidelity over idiom, as a tiebreaker.** Where the JS spec's exact
-  behavior and Go's usual style conflict, fidelity wins, and the divergence
-  gets a comment explaining why (see `expand.go`'s depth-exceeded error,
-  which capitalizes "Import" and disables `staticcheck`'s ST1005 to match the
-  JS spec's exact wording verbatim, or `cli.go`'s "Unknown argument:" message,
-  same story).
-- **Differential testing against the real JS is the standard for subtle
-  ports**, not just a nice-to-have. Several bugs in this port were caught by
-  literally running both implementations on the same input and diffing —
-  not by reasoning about the spec — most notably around JS's Unicode `\s`
-  whitespace semantics (`scan.go`'s `jsIsSpace`) and trailing-newline
-  normalization (`banner.go`'s `Assemble`, pinned by
-  `check_test.go`'s `TestAssembleMatchesJS`). If you're porting or changing
-  behavior that touches the JS spec, write a differential case before trusting
-  your own reasoning about an edge case.
-- **Inline `#nosec` / `//nolint` with a justification, not blanket
-  exclusions.** `.golangci.yml` has exactly one blanket exclusion: gosec (plus
-  errcheck/unparam) is disabled for `_test.go` files and `test/`, because test
-  code routinely creates scratch files/dirs with fixed permissions and no
-  attacker-controlled input. Everywhere else — `os.ReadFile`/`os.Stat` on
-  `@import` targets, a `0o644` output file — the suppression is inline, next
-  to the specific line, explaining why it's safe there.
-- **`t.Parallel()` in tests, with one documented exception.** Every test file
-  under `internal/flatten` and `test/` calls `t.Parallel()`. The exception is
-  `internal/cli`: its tests exercise `os.Chdir`, which mutates process-global
-  state, so parallel subtests would race on the working directory. This is
-  called out explicitly in a package comment at the top of
-  `internal/cli/cli_test.go` — read it before adding a new test there.
-- **`test/cases/` entries are data, not code.** Adding a fixture case means
-  adding a directory with a `cmd` file, an input `files/` tree, and
-  `expect/*` files — never writing Go. See `test/README.md` for the exact
-  format and a worked example of adding one.
-- **Exact-output assertions beat `strings.Contains`.** Fixture expectations
-  and unit test assertions compare full expected output (byte-for-byte for
-  `expect/files/*`, exact-or-declared-substring for `expect/stdout` /
-  `expect/stderr` — see the `~`-prefix substring rule in `test/README.md`)
-  rather than checking that an output merely contains some substring. Two
-  real bugs during development were masked by a `strings.Contains`-style
-  assertion that happened to pass on subtly wrong output; prefer pinning the
-  whole expected string (or byte-for-byte file) so a regression can't hide
-  behind a partial match.
-
+See [`docs/conventions.md`](docs/conventions.md) for testing and porting
+conventions (differential testing, `t.Parallel()` usage, fixture-case format,
+and lint suppression style).
 
 ## Build, test, lint
 
@@ -116,7 +76,7 @@ mise run check      # what CI runs: gofumpt -l check, lint, then test
 This file (`AGENTS.src.md`) is the source. **`AGENTS.md` is generated from it
 by `at-include` itself — do not hand-edit `AGENTS.md`.** If you're an agent
 and were asked to change `AGENTS.md`, make the change here (or in an imported
-file such as `docs/conventions.md`) and regenerate:
+file such as `docs/architecture.md`) and regenerate:
 
 ```sh
 mise run build && ./dist/at-include

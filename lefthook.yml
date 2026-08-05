@@ -29,9 +29,14 @@ pre-commit:
       stage_fixed: true
 
     # Dogfooding: regenerate this repo's own AGENTS.md whenever AGENTS.src.md
-    # or one of its imports (currently just docs/conventions.md) changes.
+    # (or one of its imports, currently docs/architecture.md) changes.
     # `stage_fixed: true` stages the regenerated AGENTS.md so it joins the
     # same commit instead of failing the commit over a stale file.
+    #
+    # docs/conventions.md is deliberately NOT in this glob: it's meant to be
+    # read directly by humans and agents alike, not consumed only through the
+    # generated AGENTS.md, so it isn't an @import target at all. See
+    # AGENTS.src.md for what it imports instead.
     #
     # This runs after gofumpt and before the lint/test group, on its own line
     # (not folded into the parallel group below) for the same reason gofumpt
@@ -53,7 +58,7 @@ pre-commit:
     # this repo's own docs. (Anchoring the glob as "./AGENTS.src.md" does NOT
     # work — it silently matches nothing, disabling the job.)
     - name: agents-build
-      glob: "{AGENTS.src.md,docs/conventions.md}"
+      glob: "AGENTS.src.md"
       exclude:
         - "examples/**"
       run: go run ./cmd/at-include
