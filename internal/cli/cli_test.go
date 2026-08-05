@@ -170,7 +170,7 @@ func TestRunUnknownFlagIsUsageError(t *testing.T) {
 	if code != 2 {
 		t.Errorf("code = %d, want 2", code)
 	}
-	if !strings.Contains(stderr, "Unknown argument") || !strings.Contains(stderr, "Usage") {
+	if !strings.Contains(stderr, "unknown argument") || !strings.Contains(stderr, "Usage") {
 		t.Errorf("stderr = %q", stderr)
 	}
 }
@@ -193,9 +193,50 @@ func TestRunMaxDepth(t *testing.T) {
 	}
 }
 
+// TestParseArgsMaxDepthGrammar pins the exact grammar --max-depth accepts:
+// a plain non-negative integer via strconv.Atoi, nothing more. This
+// deliberately does NOT reimplement JS Number() coercion (leading "+", "0x"/
+// "0o"/"0b" prefixes, scientific notation, decimals that round-trip to an
+// integer) — that machinery was dropped as unneeded JS-compat complexity;
+// see the deleted internal/cli/jsnumber.go. "007" is valid because
+// strconv.Atoi treats a leading zero as plain decimal, not octal.
+func TestParseArgsMaxDepthGrammar(t *testing.T) {
+	valid := []struct {
+		raw  string
+		want int
+	}{
+		{"0", 0},
+		{"2", 2},
+		{"007", 7},
+	}
+	for _, tc := range valid {
+		o, err := parseArgs([]string{"--max-depth", tc.raw})
+		if err != nil {
+			t.Errorf("parseArgs(--max-depth %q): unexpected error %v", tc.raw, err)
+			continue
+		}
+		if !o.maxDepthSet || o.maxDepth != tc.want {
+			t.Errorf("parseArgs(--max-depth %q): maxDepth = %d, maxDepthSet = %v, want %d, true",
+				tc.raw, o.maxDepth, o.maxDepthSet, tc.want)
+		}
+	}
+
+	invalid := []string{"", "-1", "1.5", "notanumber", "1e2", "0x10", "1_000"}
+	for _, raw := range invalid {
+		if _, err := parseArgs([]string{"--max-depth", raw}); err == nil {
+			t.Errorf("parseArgs(--max-depth %q): want error, got nil", raw)
+		}
+	}
+}
+
 func TestRunMaxDepthInvalidValues(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "x\n"})
-	for _, v := range []string{"notanumber", "", "-1", "1.5"} {
+	// "1e2", "0x10", and "1_000" are deliberately included here: this port no
+	// longer reimplements JS Number() coercion (see the deleted jsnumber.go),
+	// so these forms — which the old JS-compat parser accepted — are now
+	// invalid, matching plain strconv.Atoi. This is an accepted behavior
+	// change; --max-depth only ever needs a plain non-negative integer.
+	for _, v := range []string{"notanumber", "", "-1", "1.5", "1e2", "0x10", "1_000"} {
 		code, _, stderr := run(t, dir, "--max-depth", v)
 		if code != 2 {
 			t.Errorf("--max-depth %q: code = %d, want 2", v, code)

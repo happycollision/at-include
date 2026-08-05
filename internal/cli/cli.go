@@ -218,8 +218,7 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 	assembled := flatten.Assemble(flatten.Banner(fOpts), content)
 	// #nosec G306 -- 0o644 is the intended permission for a generated Markdown
 	// doc meant to be read (and edited by hand between regenerations, before
-	// the "generated" banner is noticed) like any other checked-in file; it
-	// mirrors the JS's writeFileSync(outPath, ...) with Node's default mode.
+	// the "generated" banner is noticed) like any other checked-in file.
 	if err := os.WriteFile(fOpts.OutPath, []byte(assembled), 0o644); err != nil {
 		fprintf(stderr, "at-include: %s\n", err)
 		return 1
@@ -293,12 +292,11 @@ func fprintf(w io.Writer, format string, a ...any) {
 // markers against a different root and fails --check all over again).
 //
 // So: echo back opts's typed values, comparing each against its default to
-// decide whether to include the flag at all. This does under-report one
-// synthetic edge case symmetrically with the JS-parity note above: a
-// `--marker-desc ""` that is passed explicitly is indistinguishable in the
-// printed command from "not passed" UNLESS we consult markerDescSet, which we
-// do (see below) — so that case is in fact handled correctly, unlike an
-// earlier draft that only compared against "".
+// decide whether to include the flag at all. One synthetic edge case is worth
+// calling out: a `--marker-desc ""` that is passed explicitly is
+// indistinguishable in the printed command from "not passed" UNLESS we
+// consult markerDescSet, which we do (see below) — so that case is in fact
+// handled correctly, unlike an earlier draft that only compared against "".
 func regenCommand(opts options) string {
 	parts := []string{"at-include"}
 	if opts.src != defaultSrc {
@@ -384,13 +382,13 @@ func parseArgs(argv []string) (options, error) {
 				raw = argv[i+1]
 			}
 			i++
-			n, ok := parseNonNegativeIntJS(raw)
-			if !ok {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 0 {
 				return o, fmt.Errorf("--max-depth requires a non-negative integer, got: %s", raw)
 			}
 			o.maxDepth, o.maxDepthSet = n, true
 		default:
-			return o, fmt.Errorf("Unknown argument: %s", a) //nolint:staticcheck // ST1005: matches the JS spec's exact "Unknown argument: %s" message verbatim (see the precedent on expand.go's depth-exceeded error).
+			return o, fmt.Errorf("unknown argument: %s", a)
 		}
 	}
 	return o, nil
