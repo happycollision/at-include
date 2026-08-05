@@ -1,0 +1,48 @@
+[tools]
+go = "1.25.6"
+golangci-lint = "2.12.2"
+gofumpt = "0.11.0"
+goreleaser = "2.17.1"
+lefthook = "2.1.10"
+
+[env]
+# Keep tool-installed binaries on PATH for `go run`-installed helpers.
+GOTOOLCHAIN = "local"
+
+[tasks.build]
+description = "Build the at-include binary into ./dist"
+run = "go build -trimpath -ldflags \"-s -w -X main.version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)\" -o dist/at-include ./cmd/at-include"
+
+[tasks.test]
+description = "Run all tests (unit + fixture CLI suite)"
+depends = ["build"]
+run = "go test ./... -count=1"
+
+[tasks.fmt]
+description = "Format all Go code with gofumpt"
+run = "gofumpt -l -w ."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run"
+
+[tasks.check]
+description = "Verify formatting, lint, and tests — what CI runs"
+run = [
+  '''
+  out=$(gofumpt -l .)
+  if [ -n "$out" ]; then
+    echo "$out"
+    echo "The above files are not gofumpt-formatted. Run: mise run fmt" >&2
+    exit 1
+  fi
+  ''',
+  "golangci-lint run",
+  "go test ./... -count=1",
+]
+
+[tasks.ci]
+description = "Alias for check"
+depends = ["check"]
+run = "echo ok"
+
