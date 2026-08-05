@@ -141,6 +141,13 @@ func TestCheckMissingOutputIsStaleNotAnError(t *testing.T) {
 
 // --- Differential tests against the JS reference implementation ---
 //
+// These values were captured from build-agents.mjs, the tool this port
+// originated from — a historical reference for what the "First difference
+// around line N" output and trailing-newline handling should look like, not
+// an ongoing constraint on how check.go itself is implemented. The values
+// stay pinned here because they're still the correct, user-visible expected
+// output.
+//
 // The JS build-agents.mjs firstDiffExcerpt/assembleOutput are not exported, so
 // these cases were captured by copying both functions verbatim into a scratch
 // .mjs (unchanged) and running it under node against a battery of

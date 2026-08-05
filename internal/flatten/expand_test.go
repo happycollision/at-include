@@ -207,20 +207,16 @@ func TestFlattenMaxDepthExceeded(t *testing.T) {
 	if err == nil {
 		t.Fatal("Flatten: want depth error, got nil")
 	}
-	// Pinned against the JS: Import depth ${stack.length} exceeds
-	// --max-depth ${maxDepth} at ${toRootRel(absPath)}. Capital "Import" is
-	// mandated by the spec (see expand.go's nolint comment) — asserting the
-	// exact string (not a lowercased substring match) is what makes a
-	// capitalization regression here impossible to miss.
-	want := "Import depth 3 exceeds --max-depth 2 at c.md"
+	// Asserting the exact string (not a substring match) is what makes a
+	// wording or capitalization regression here impossible to miss.
+	want := "import depth 3 exceeds --max-depth 2 at c.md"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
 }
 
 // TestFlattenMaxDepthZero pins the MaxDepth: 0 boundary: a single import puts
-// stack length at 1, which exceeds a max of 0. Expected message verified
-// against the JS (with the Fix 1 capitalization applied).
+// stack length at 1, which exceeds a max of 0.
 func TestFlattenMaxDepthZero(t *testing.T) {
 	t.Parallel()
 	root := makeTree(t, map[string]string{
@@ -233,7 +229,7 @@ func TestFlattenMaxDepthZero(t *testing.T) {
 	if err == nil {
 		t.Fatal("Flatten: want depth error, got nil")
 	}
-	want := "Import depth 1 exceeds --max-depth 0 at a.md"
+	want := "import depth 1 exceeds --max-depth 0 at a.md"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}

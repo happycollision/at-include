@@ -33,9 +33,8 @@ func Check(opts Options) (CheckResult, error) {
 		return CheckResult{}, err
 	}
 	// #nosec G304 G703 -- opts.OutPath is the tool's own configured output
-	// path (mirrors JS checkAgents's existsSync/readFileSync(outPath, "utf8"));
-	// reading it back to compare against a fresh render is the entire point of
-	// --check.
+	// path; reading it back to compare against a fresh render is the entire
+	// point of --check.
 	actual, err := os.ReadFile(opts.OutPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

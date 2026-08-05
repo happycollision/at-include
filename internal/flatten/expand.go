@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"unicode/utf8"
 )
 
 // DefaultMarkerDesc is the parenthetical Claude Code uses when it inlines a
@@ -87,51 +86,39 @@ type expander struct {
 // they are not used as naked returns.
 func Flatten(opts Options) (content string, inlined int, err error) {
 	e := &expander{opts: opts, inlined: map[string]bool{}}
-	content, err = e.expandFile(opts.SrcPath, nil)
+	content, err = e.expandFile(opts.SrcPath, 0)
 	if err != nil {
 		return "", 0, err
 	}
 	return content, e.count, nil
 }
 
-// expandFile reads absPath and returns its transformed text. stack holds the
-// ancestor paths on the current import chain; its length is the hop count.
-// The contents of stack are currently unused beyond their length — they are
-// kept for JS parity (JS builds the same [...stack, importerAbsPath] chain)
-// and to enable a future import-chain trace in error messages, so don't
-// "clean up" stack into a bare counter.
-func (e *expander) expandFile(absPath string, stack []string) (string, error) {
-	if e.opts.MaxDepthSet && len(stack) > e.opts.MaxDepth {
-		// Capital "Import" is intentional: it must match the JS spec's error
-		// text (build-agents.mjs's `Import depth ${...} exceeds --max-depth
-		// ${...} at ${...}`) verbatim, since the CLI prints it through
-		// unchanged. This violates the Go convention that error strings
-		// shouldn't be capitalized (ST1005), but fidelity to the spec wins.
-		//nolint:staticcheck // ST1005: capitalization is mandated by the JS spec's exact error text.
-		return "", fmt.Errorf("Import depth %d exceeds --max-depth %d at %s",
-			len(stack), e.opts.MaxDepth, e.toRootRel(absPath))
+// expandFile reads absPath and returns its transformed text. depth is the hop
+// count of the current import chain (0 for the source file itself).
+func (e *expander) expandFile(absPath string, depth int) (string, error) {
+	if e.opts.MaxDepthSet && depth > e.opts.MaxDepth {
+		return "", fmt.Errorf("import depth %d exceeds --max-depth %d at %s",
+			depth, e.opts.MaxDepth, e.toRootRel(absPath))
 	}
 	// #nosec G304 G703 -- absPath is a user-specified @import target; reading
-	// arbitrary caller-chosen files is this tool's entire purpose (mirrors
-	// JS readFileSync(absPath, "utf8")).
+	// arbitrary caller-chosen files is this tool's entire purpose.
 	//
-	// Node's readFileSync(path, "utf8") decodes file contents as UTF-8 with
-	// U+FFFD replacement for invalid byte sequences; this port passes the raw
-	// bytes through unchanged (see the code-span, token, and default-rune
-	// paths in transformLine). For valid UTF-8 input — the realistic case for
-	// instruction files — the two are identical. Invalid UTF-8 is an accepted,
-	// documented deviation: we intentionally do not add a replacement-decoding
-	// pass to the hot path for a case that doesn't occur in practice.
+	// Invalid (non-UTF-8) byte sequences in an imported file are passed
+	// through unchanged rather than replaced with U+FFFD (see the code-span,
+	// token, and default-rune paths in transformLine/scanLine). This is
+	// deliberate: adding a replacement-decoding pass to the hot path isn't
+	// worth it for a case that doesn't occur in practice for real
+	// instruction files, which are valid UTF-8.
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return "", err
 	}
-	return e.transform(string(data), absPath, stack)
+	return e.transform(string(data), absPath, depth)
 }
 
 // transform rewrites a file's text line by line, copying fenced code blocks
 // through verbatim.
-func (e *expander) transform(text, importerAbsPath string, stack []string) (string, error) {
+func (e *expander) transform(text, importerAbsPath string, depth int) (string, error) {
 	importerDir := filepath.Dir(importerAbsPath)
 	var fence fenceState
 	lines := strings.Split(text, "\n")
@@ -142,7 +129,7 @@ func (e *expander) transform(text, importerAbsPath string, stack []string) (stri
 			out = append(out, line)
 			continue
 		}
-		expanded, err := e.transformLine(line, importerDir, stack, importerAbsPath)
+		expanded, err := e.transformLine(line, importerDir, depth)
 		if err != nil {
 			return "", err
 		}
@@ -152,57 +139,24 @@ func (e *expander) transform(text, importerAbsPath string, stack []string) (stri
 }
 
 // transformLine rebuilds one line: inline code spans are kept verbatim
-// (backticks included) and resolvable @tokens are replaced.
-//
-// Token scanning is rune-aware and uses jsIsSpace, matching JS
-// transformLine's `/\s/.test(line[j])` under Unicode semantics — the same
-// whitespace definition the scanner (scan.go) uses. Note the deliberate
-// asymmetry with FindImports documented on that function: this scan does NOT
-// strip inline code spans first, so a token can run through backticks (see
-// the case '`' handling below only splits spans that start at the top level;
-// once inside an '@' token, backticks are just non-whitespace characters).
-func (e *expander) transformLine(line, importerDir string, stack []string, importerAbsPath string) (string, error) {
+// (backticks included) and resolvable @tokens are replaced. It splits the
+// line into pieces with the same scanLine rule FindImports uses (scan.go), so
+// --list-imports always reports exactly the tokens expansion would consider.
+func (e *expander) transformLine(line, importerDir string, depth int) (string, error) {
 	var b strings.Builder
-	for i := 0; i < len(line); {
-		switch line[i] {
-		case '`':
-			ticks := 0
-			for i < len(line) && line[i] == '`' {
-				ticks++
-				i++
-			}
-			closer := strings.Repeat("`", ticks)
-			closeIdx := strings.Index(line[i:], closer)
-			if closeIdx == -1 {
-				b.WriteString(closer) // unterminated run: literal backticks
-				continue
-			}
-			b.WriteString(closer + line[i:i+closeIdx] + closer)
-			i += closeIdx + ticks
-		case '@':
-			j := i + 1
-			for j < len(line) {
-				r, size := utf8.DecodeRuneInString(line[j:])
-				if jsIsSpace(r) {
-					break
-				}
-				j += size
-			}
-			token := line[i+1 : j]
-			expansion, ok, err := e.tryExpandToken(token, importerDir, stack, importerAbsPath)
-			if err != nil {
-				return "", err
-			}
-			if ok {
-				b.WriteString(expansion)
-			} else {
-				b.WriteString("@" + token)
-			}
-			i = j
-		default:
-			r, size := utf8.DecodeRuneInString(line[i:])
-			b.WriteRune(r)
-			i += size
+	for _, piece := range scanLine(line) {
+		if !piece.IsToken {
+			b.WriteString(piece.Text)
+			continue
+		}
+		expansion, ok, err := e.tryExpandToken(piece.Text, importerDir, depth)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			b.WriteString(expansion)
+		} else {
+			b.WriteString("@" + piece.Text)
 		}
 	}
 	return b.String(), nil
@@ -211,7 +165,7 @@ func (e *expander) transformLine(line, importerDir string, stack []string, impor
 // tryExpandToken resolves a single @token. ok is false when the token should be
 // left in the output as literal text, which is the case for anything that is not
 // an existing regular file.
-func (e *expander) tryExpandToken(token, importerDir string, stack []string, importerAbsPath string) (expansion string, ok bool, err error) {
+func (e *expander) tryExpandToken(token, importerDir string, depth int) (expansion string, ok bool, err error) {
 	if token == "" {
 		return "", false, nil
 	}
@@ -221,17 +175,17 @@ func (e *expander) tryExpandToken(token, importerDir string, stack []string, imp
 	}
 	// #nosec G304 G703 -- abs is derived from a user-specified @import token;
 	// statting arbitrary caller-chosen paths to check file existence/type is
-	// this tool's entire purpose (mirrors JS existsSync/statSync on abs).
+	// this tool's entire purpose.
 	info, statErr := os.Stat(abs)
 	if statErr != nil || !info.Mode().IsRegular() {
-		// Deliberately swallowing statErr here (rather than returning it) is JS
-		// semantics, not an oversight: the JS spec treats "the token doesn't
-		// resolve to a file" (whether because it doesn't exist, a parent
-		// directory in the path doesn't exist, or a permission error prevents
-		// stat'ing it) as "leave the @token as literal text", never as a hard
+		// Deliberately swallowing statErr here (rather than returning it) is
+		// the intended behavior, not an oversight: "the token doesn't resolve
+		// to a file" (whether because it doesn't exist, a parent directory in
+		// the path doesn't exist, or a permission error prevents stat'ing it)
+		// always means "leave the @token as literal text", never a hard
 		// failure of the whole run. So every os.Stat error here — not just
 		// os.ErrNotExist — is folded into the same "unresolvable" outcome.
-		//nolint:nilerr // statErr is intentionally discarded: unresolvable token -> literal text, per JS spec.
+		//nolint:nilerr // statErr is intentionally discarded: unresolvable token -> literal text is the documented behavior, not an error.
 		return "", false, nil
 	}
 
@@ -242,7 +196,7 @@ func (e *expander) tryExpandToken(token, importerDir string, stack []string, imp
 	e.inlined[abs] = true
 	e.count++
 
-	inner, err := e.expandFile(abs, append(append([]string{}, stack...), importerAbsPath))
+	inner, err := e.expandFile(abs, depth+1)
 	if err != nil {
 		return "", false, err
 	}
