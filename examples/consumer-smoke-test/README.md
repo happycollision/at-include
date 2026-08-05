@@ -25,7 +25,7 @@ told to trust. Consumers hit this too, on first use in any new repo.
 
 - The release archive downloads, its checksum verifies, and GitHub attestations
   and SLSA provenance check out.
-- `at-include --version` reports `0.1.0` — proving the `-ldflags` version
+- `at-include --version` reports `0.1.1` — proving the `-ldflags` version
   injection survives the goreleaser build, not just the local `mise run build`.
 - Nested imports resolve relative to the importing file (`notes/setup.md` pulls
   in `notes/shared.md`).

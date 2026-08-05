@@ -86,7 +86,7 @@ directly from GitHub Releases:
 
 ```toml
 [tools]
-"github:happycollision/at-include" = "latest"  # pin to an exact version once you've picked one, e.g. "0.1.0"
+"github:happycollision/at-include" = "latest"  # or pin an exact version, e.g. "0.2.3"
 ```
 
 Then install and lock it:
@@ -98,15 +98,13 @@ mise lock
 
 Commit both `mise.toml` and the resulting `mise.lock`. From then on, anyone
 (or any CI runner) who runs `mise install` in this repo gets the identical
-`at-include` binary.
+`at-include` binary — checksum-verified, with no global installs and no Go
+toolchain required.
 
-> **Note on availability:** `at-include` has no tagged release yet, so `mise
-> install` can't resolve the entry above today — verified: it 404s against
-> GitHub's releases API. The `github:` form is otherwise the correct,
-> verified syntax for a repo with no separate mise-registry entry (confirmed
-> against a real published tool, `github:BurntSushi/ripgrep`); it will work
-> unmodified for `at-include` as soon as a tagged release exists. Until then,
-> use one of the alternatives below.
+`at-include` has no entry in mise's central registry, so the `github:` backend
+prefix is required; a bare `at-include = "latest"` will not resolve. mise also
+refuses to read a config file it hasn't been told to trust, so the first run in
+a new repo needs `mise trust`.
 
 ### Alternatives
 
@@ -159,7 +157,7 @@ Add tasks to the consumer repo's `mise.toml`:
 
 ```toml
 [tools]
-"github:happycollision/at-include" = "latest"  # pin to an exact version, e.g. "0.1.0"
+"github:happycollision/at-include" = "latest"  # or pin an exact version
 
 [tasks.agents-build]
 description = "Regenerate AGENTS.md from AGENTS.src.md"

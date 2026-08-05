@@ -3,7 +3,7 @@
 # source — that is the point. This directory exists to catch installation
 # regressions (bad archive names, missing assets, broken ldflags).
 [tools]
-"github:happycollision/at-include" = "0.1.0"
+"github:happycollision/at-include" = "0.1.1"
 
 [tasks.docs]
 description = "Regenerate AGENTS.md from AGENTS.src.md"
