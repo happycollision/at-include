@@ -12,8 +12,14 @@ GOTOOLCHAIN = "local"
 [tasks.build]
 description = "Build the at-include binary into ./dist"
 # The -X path here is the one, canonical version-injection point (see the doc
-# comment on cli.Version in internal/cli/cli.go) — Task 8's goreleaser config
-# must use this same path.
+# comment on cli.Version in internal/cli/cli.go) — the goreleaser config must
+# use this same path.
+#
+# shell: these tasks use POSIX constructs — command substitution here, a
+# variable assignment in `check`, `./`-prefixed paths in the docs tasks. On
+# Windows mise defaults to cmd.exe, which parses none of that, so pin bash
+# explicitly. GitHub's windows runners ship Git Bash, so it is always present.
+shell = "bash -c"
 run = "go build -trimpath -ldflags \"-s -w -X github.com/happycollision/at-include/internal/cli.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)\" -o dist/at-include ./cmd/at-include"
 
 [tasks.test]
@@ -31,6 +37,7 @@ run = "golangci-lint run"
 
 [tasks.check]
 description = "Verify formatting, lint, and tests — what CI runs"
+shell = "bash -c" # see the note on [tasks.build]
 run = [
   '''
   out=$(gofumpt -l .)
@@ -51,10 +58,12 @@ depends = ["check"]
 [tasks.docs]
 description = "Regenerate AGENTS.md from AGENTS.src.md (dogfoods at-include on this repo)"
 depends = ["build"]
+shell = "bash -c" # see the note on [tasks.build]
 run = "./dist/at-include"
 
 [tasks."docs:check"]
 description = "Verify AGENTS.md is up to date (CI gate, dogfoods at-include on this repo)"
 depends = ["build"]
+shell = "bash -c" # see the note on [tasks.build]
 run = "./dist/at-include --check"
 
