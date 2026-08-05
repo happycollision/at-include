@@ -1,0 +1,1 @@
+Shared diamond content.

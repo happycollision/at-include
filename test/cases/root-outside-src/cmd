@@ -1,0 +1,6 @@
+--src
+proj/sub/AGENTS.src.md
+--out
+proj/sub/AGENTS.md
+--root
+proj/other

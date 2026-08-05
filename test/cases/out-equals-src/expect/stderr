@@ -1,0 +1,4 @@
+~
+at-include: --out must not be the same file as --src
+this would overwrite the hand-authored source
+Usage: at-include [options]

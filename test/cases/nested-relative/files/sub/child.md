@@ -1,0 +1,3 @@
+Child content.
+
+@sibling.md

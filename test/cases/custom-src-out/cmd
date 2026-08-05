@@ -1,0 +1,6 @@
+--src
+docs/CLAUDE.src.md
+--out
+docs/CLAUDE.md
+--root
+.

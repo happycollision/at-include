@@ -1,0 +1,3 @@
+~
+--max-depth requires a non-negative integer, got: notanumber
+Usage: at-include [options]

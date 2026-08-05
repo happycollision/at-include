@@ -1,0 +1,8 @@
+~
+Usage: at-include [options]
+Options:
+--check
+--src <path>
+--version
+--help, -h
+Exit codes: 0 success, 1 out-of-date or runtime error, 2 usage error.
