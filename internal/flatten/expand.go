@@ -14,6 +14,10 @@ const DefaultMarkerDesc = "project instructions, checked into the codebase"
 
 // Options configures a flattening run. Paths must be absolute; RootDir decides
 // how paths are rendered in the inline markers.
+//
+// SrcName, OutName, and OutPath are consumed by the banner/check/CLI layers;
+// Flatten itself uses only SrcPath, RootDir, MaxDepth/MaxDepthSet, and
+// MarkerDesc.
 type Options struct {
 	SrcPath     string
 	OutPath     string
@@ -34,6 +38,9 @@ func (o Options) markerDesc() string {
 
 // expander carries the state that must be shared across the whole recursive
 // walk: which files have already been inlined in full, and how many were.
+//
+// Not safe for concurrent use: Flatten creates a fresh expander per call, and
+// its inlined/count state is mutated in place during the recursive walk.
 type expander struct {
 	opts    Options
 	inlined map[string]bool
@@ -57,11 +64,32 @@ func Flatten(opts Options) (string, int, error) {
 
 // expandFile reads absPath and returns its transformed text. stack holds the
 // ancestor paths on the current import chain; its length is the hop count.
+// The contents of stack are currently unused beyond their length — they are
+// kept for JS parity (JS builds the same [...stack, importerAbsPath] chain)
+// and to enable a future import-chain trace in error messages, so don't
+// "clean up" stack into a bare counter.
 func (e *expander) expandFile(absPath string, stack []string) (string, error) {
 	if e.opts.MaxDepthSet && len(stack) > e.opts.MaxDepth {
-		return "", fmt.Errorf("import depth %d exceeds --max-depth %d at %s",
+		// Capital "Import" is intentional: it must match the JS spec's error
+		// text (build-agents.mjs's `Import depth ${...} exceeds --max-depth
+		// ${...} at ${...}`) verbatim, since the CLI prints it through
+		// unchanged. This violates the Go convention that error strings
+		// shouldn't be capitalized (ST1005), but fidelity to the spec wins.
+		//nolint:staticcheck // ST1005: capitalization is mandated by the JS spec's exact error text.
+		return "", fmt.Errorf("Import depth %d exceeds --max-depth %d at %s",
 			len(stack), e.opts.MaxDepth, e.toRootRel(absPath))
 	}
+	// #nosec G304 G703 -- absPath is a user-specified @import target; reading
+	// arbitrary caller-chosen files is this tool's entire purpose (mirrors
+	// JS readFileSync(absPath, "utf8")).
+	//
+	// Node's readFileSync(path, "utf8") decodes file contents as UTF-8 with
+	// U+FFFD replacement for invalid byte sequences; this port passes the raw
+	// bytes through unchanged (see the code-span, token, and default-rune
+	// paths in transformLine). For valid UTF-8 input — the realistic case for
+	// instruction files — the two are identical. Invalid UTF-8 is an accepted,
+	// documented deviation: we intentionally do not add a replacement-decoding
+	// pass to the hot path for a case that doesn't occur in practice.
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return "", err
@@ -151,7 +179,7 @@ func (e *expander) transformLine(line, importerDir string, stack []string, impor
 // tryExpandToken resolves a single @token. ok is false when the token should be
 // left in the output as literal text, which is the case for anything that is not
 // an existing regular file.
-func (e *expander) tryExpandToken(token, importerDir string, stack []string, importerAbsPath string) (string, bool, error) {
+func (e *expander) tryExpandToken(token, importerDir string, stack []string, importerAbsPath string) (expansion string, ok bool, err error) {
 	if token == "" {
 		return "", false, nil
 	}
@@ -159,8 +187,11 @@ func (e *expander) tryExpandToken(token, importerDir string, stack []string, imp
 	if !filepath.IsAbs(abs) {
 		abs = filepath.Join(importerDir, filepath.FromSlash(token))
 	}
-	info, err := os.Stat(abs)
-	if err != nil || !info.Mode().IsRegular() {
+	// #nosec G304 G703 -- abs is derived from a user-specified @import token;
+	// statting arbitrary caller-chosen paths to check file existence/type is
+	// this tool's entire purpose (mirrors JS existsSync/statSync on abs).
+	info, statErr := os.Stat(abs)
+	if statErr != nil || !info.Mode().IsRegular() {
 		return "", false, nil // unresolvable or not a file: literal text, never an error
 	}
 

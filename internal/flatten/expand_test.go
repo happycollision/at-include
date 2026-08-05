@@ -29,18 +29,22 @@ func makeTree(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+// optsFor deliberately leaves MarkerDesc unset (zero value) so the whole
+// suite exercises markerDesc()'s default-branch behavior; that default value
+// equals DefaultMarkerDesc, so existing assertions are unaffected.
+// TestFlattenCustomMarkerDesc separately pins the override path.
 func optsFor(root string) Options {
 	return Options{
-		SrcPath:    filepath.Join(root, "AGENTS.src.md"),
-		OutPath:    filepath.Join(root, "AGENTS.md"),
-		RootDir:    root,
-		MarkerDesc: DefaultMarkerDesc,
-		SrcName:    "AGENTS.src.md",
-		OutName:    "AGENTS.md",
+		SrcPath: filepath.Join(root, "AGENTS.src.md"),
+		OutPath: filepath.Join(root, "AGENTS.md"),
+		RootDir: root,
+		SrcName: "AGENTS.src.md",
+		OutName: "AGENTS.md",
 	}
 }
 
 func TestFlattenInlinesSingleImport(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md":           "Top\n\n@PROJECT_MEMORY/index.md\n\nBottom\n",
 		"PROJECT_MEMORY/index.md": "MEMORY CONTENT\n",
@@ -65,6 +69,7 @@ func TestFlattenInlinesSingleImport(t *testing.T) {
 }
 
 func TestFlattenResolvesNestedRelativeToImporter(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md":           "@PROJECT_MEMORY/index.md\n",
 		"PROJECT_MEMORY/index.md": "INDEX\n\n@leaf.md\n",
@@ -88,6 +93,7 @@ func TestFlattenResolvesNestedRelativeToImporter(t *testing.T) {
 }
 
 func TestFlattenLeavesUnresolvableTokensLiteral(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md": "Use @app-variants/astro and mail foo@bar.com\n",
 	})
@@ -106,6 +112,7 @@ func TestFlattenLeavesUnresolvableTokensLiteral(t *testing.T) {
 }
 
 func TestFlattenDiamondEmitsSingleCopy(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md": "@a.md\n\n@b.md\n",
 		"a.md":          "A\n\n@shared.md\n",
@@ -127,7 +134,49 @@ func TestFlattenDiamondEmitsSingleCopy(t *testing.T) {
 	}
 }
 
+// TestFlattenGoldenDiamond pins the diamond case's EXACT full output, not just
+// substring/count checks, so a check.go-style byte-exact comparison would
+// actually catch a regression in where the "already inlined above" marker
+// lands relative to the surrounding content. Expected value verified against
+// the JS buildAgents() with the same input tree.
+func TestFlattenGoldenDiamond(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md": "@a.md\n\n@b.md\n",
+		"a.md":          "A\n\n@shared.md\n",
+		"b.md":          "B\n\n@shared.md\n",
+		"shared.md":     "SHARED-UNIQUE-CONTENT\n",
+	})
+	content, inlined, err := Flatten(optsFor(root))
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if inlined != 3 {
+		t.Errorf("inlined = %d, want 3", inlined)
+	}
+	want := "Contents of a.md (project instructions, checked into the codebase):\n" +
+		"\n" +
+		"A\n" +
+		"\n" +
+		"Contents of shared.md (project instructions, checked into the codebase):\n" +
+		"\n" +
+		"SHARED-UNIQUE-CONTENT\n" +
+		"\n" +
+		"\n" +
+		"\n" +
+		"Contents of b.md (project instructions, checked into the codebase):\n" +
+		"\n" +
+		"B\n" +
+		"\n" +
+		"Contents of shared.md (already inlined above):\n" +
+		"\n"
+	if content != want {
+		t.Errorf("content = %q\nwant      %q", content, want)
+	}
+}
+
 func TestFlattenTerminatesOnCycle(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md": "@a.md\n",
 		"a.md":          "A\n\n@b.md\n",
@@ -148,19 +197,50 @@ func TestFlattenTerminatesOnCycle(t *testing.T) {
 }
 
 func TestFlattenMaxDepthExceeded(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md": "@a.md\n", "a.md": "@b.md\n", "b.md": "@c.md\n", "c.md": "DEEP\n",
 	})
 	opts := optsFor(root)
 	opts.MaxDepth, opts.MaxDepthSet = 2, true
-	if _, _, err := Flatten(opts); err == nil {
+	_, _, err := Flatten(opts)
+	if err == nil {
 		t.Fatal("Flatten: want depth error, got nil")
-	} else if !strings.Contains(strings.ToLower(err.Error()), "depth") {
-		t.Errorf("error %q should mention depth", err)
+	}
+	// Pinned against the JS: Import depth ${stack.length} exceeds
+	// --max-depth ${maxDepth} at ${toRootRel(absPath)}. Capital "Import" is
+	// mandated by the spec (see expand.go's nolint comment) — asserting the
+	// exact string (not a lowercased substring match) is what makes a
+	// capitalization regression here impossible to miss.
+	want := "Import depth 3 exceeds --max-depth 2 at c.md"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+// TestFlattenMaxDepthZero pins the MaxDepth: 0 boundary: a single import puts
+// stack length at 1, which exceeds a max of 0. Expected message verified
+// against the JS (with the Fix 1 capitalization applied).
+func TestFlattenMaxDepthZero(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md": "@a.md\n",
+		"a.md":          "CONTENT\n",
+	})
+	opts := optsFor(root)
+	opts.MaxDepth, opts.MaxDepthSet = 0, true
+	_, _, err := Flatten(opts)
+	if err == nil {
+		t.Fatal("Flatten: want depth error, got nil")
+	}
+	want := "Import depth 1 exceeds --max-depth 0 at a.md"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
 }
 
 func TestFlattenMaxDepthBoundaryAllowed(t *testing.T) {
+	t.Parallel()
 	// src(0) -> a(1) -> b(2): the deepest inline happens at stack length 2,
 	// which must NOT fail at MaxDepth 2. Pins a > vs >= regression.
 	root := makeTree(t, map[string]string{
@@ -181,6 +261,7 @@ func TestFlattenMaxDepthBoundaryAllowed(t *testing.T) {
 }
 
 func TestFlattenPreservesFencedAndInlineCode(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md": strings.Join([]string{
 			"```", "@real.md", "```", "and `@real.md` and @real.md",
@@ -202,7 +283,36 @@ func TestFlattenPreservesFencedAndInlineCode(t *testing.T) {
 	}
 }
 
+// TestFlattenUnterminatedBacktickStillExpandsToken covers the least obvious
+// branch in transformLine (expand.go's closeIdx == -1 case): an unmatched
+// backtick run is emitted literally as plain text, and scanning continues so
+// a subsequent @token on the same line still expands normally. Expected
+// output verified against the JS transformLine/buildAgents with the same
+// input.
+func TestFlattenUnterminatedBacktickStillExpandsToken(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md": "`@a.md and more\n",
+		"a.md":          "A-CONTENT\n",
+	})
+	content, inlined, err := Flatten(optsFor(root))
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if inlined != 1 {
+		t.Errorf("inlined = %d, want 1", inlined)
+	}
+	want := "`Contents of a.md (project instructions, checked into the codebase):\n" +
+		"\n" +
+		"A-CONTENT\n" +
+		" and more\n"
+	if content != want {
+		t.Errorf("content = %q\nwant      %q", content, want)
+	}
+}
+
 func TestFlattenDirectoryTokenStaysLiteral(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md": "@subdir and @subdir/f.md\n",
 		"subdir/f.md":   "F\n",
@@ -220,6 +330,7 @@ func TestFlattenDirectoryTokenStaysLiteral(t *testing.T) {
 }
 
 func TestFlattenMissingSourceIsAnError(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{"other.md": "x\n"})
 	if _, _, err := Flatten(optsFor(root)); err == nil {
 		t.Fatal("Flatten: want error for missing source, got nil")
@@ -227,6 +338,7 @@ func TestFlattenMissingSourceIsAnError(t *testing.T) {
 }
 
 func TestFlattenSelfImportTerminates(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md": "Top\n@AGENTS.src.md\nBottom\n",
 	})
@@ -243,6 +355,7 @@ func TestFlattenSelfImportTerminates(t *testing.T) {
 }
 
 func TestFlattenTrailingCommaTokenDoesNotResolve(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md": "@a.md,\n",
 		"a.md":          "A-CONTENT\n",
@@ -260,6 +373,7 @@ func TestFlattenTrailingCommaTokenDoesNotResolve(t *testing.T) {
 }
 
 func TestFlattenNoTrailingNewlineGetsOne(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md": "@a.md\n",
 		"a.md":          "NO-TRAILING-NEWLINE",
@@ -278,6 +392,7 @@ func TestFlattenNoTrailingNewlineGetsOne(t *testing.T) {
 }
 
 func TestFlattenEmptyImportedFile(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.src.md": "@a.md\n",
 		"a.md":          "",
@@ -295,7 +410,40 @@ func TestFlattenEmptyImportedFile(t *testing.T) {
 	}
 }
 
+// TestFlattenGoldenSingleImport pins the EXACT full output for a
+// nested/prose-surrounded tree (not just substring checks), matching what
+// check.go's byte-exact comparison will require. Note the \n\n\n between
+// content and Bottom: the expansion's ensured trailing newline plus the
+// source's own blank line. Expected value verified against the JS
+// buildAgents() with the same input tree.
+func TestFlattenGoldenSingleImport(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md":           "Top\n\n@PROJECT_MEMORY/index.md\n\nBottom\n",
+		"PROJECT_MEMORY/index.md": "MEMORY CONTENT\n",
+	})
+	content, inlined, err := Flatten(optsFor(root))
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if inlined != 1 {
+		t.Errorf("inlined = %d, want 1", inlined)
+	}
+	want := "Top\n" +
+		"\n" +
+		"Contents of PROJECT_MEMORY/index.md (project instructions, checked into the codebase):\n" +
+		"\n" +
+		"MEMORY CONTENT\n" +
+		"\n" +
+		"\n" +
+		"Bottom\n"
+	if content != want {
+		t.Errorf("content = %q\nwant      %q", content, want)
+	}
+}
+
 func TestFlattenAbsolutePathToken(t *testing.T) {
+	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"outside/z.md": "ABS-CONTENT\n",
 	})
@@ -320,6 +468,9 @@ func TestFlattenAbsolutePathToken(t *testing.T) {
 	if !strings.Contains(content, "ABS-CONTENT") {
 		t.Errorf("content missing ABS-CONTENT\ngot:\n%s", content)
 	}
+	if !strings.HasPrefix(content, "X") {
+		t.Errorf("adjacent literal 'X' prefix was eaten\ngot:\n%s", content)
+	}
 }
 
 func mustRel(t *testing.T, base, target string) string {
@@ -332,6 +483,7 @@ func mustRel(t *testing.T, base, target string) string {
 }
 
 func TestFlattenTokenOutsideRootDirUsesDotDot(t *testing.T) {
+	t.Parallel()
 	// RootDir is the "sub" directory; the import reaches a sibling directory
 	// outside RootDir. The marker should show a "../" relative path, matching
 	// Node's path.relative (no special-casing for outside-root paths).
@@ -359,5 +511,34 @@ func TestFlattenTokenOutsideRootDirUsesDotDot(t *testing.T) {
 	}
 	if !strings.Contains(content, "SIBLING-CONTENT") {
 		t.Errorf("content missing SIBLING-CONTENT\ngot:\n%s", content)
+	}
+}
+
+// TestFlattenCustomMarkerDesc pins markerDesc()'s override branch: when
+// Options.MarkerDesc is non-empty, it replaces DefaultMarkerDesc verbatim in
+// every inline marker. optsFor deliberately leaves MarkerDesc unset so the
+// rest of the suite exercises the default branch instead; this is the one
+// test for the non-default path.
+func TestFlattenCustomMarkerDesc(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md": "@a.md\n",
+		"a.md":          "A-CONTENT\n",
+	})
+	opts := optsFor(root)
+	opts.MarkerDesc = "custom marker text"
+	content, inlined, err := Flatten(opts)
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if inlined != 1 {
+		t.Errorf("inlined = %d, want 1", inlined)
+	}
+	want := "Contents of a.md (custom marker text):\n\nA-CONTENT\n\n"
+	if content != want {
+		t.Errorf("content = %q, want %q", content, want)
+	}
+	if strings.Contains(content, DefaultMarkerDesc) {
+		t.Errorf("content should not contain the default marker desc\ngot:\n%s", content)
 	}
 }
