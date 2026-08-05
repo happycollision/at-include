@@ -1,0 +1,69 @@
+version: 2
+
+project_name: at-include
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: at-include
+    main: ./cmd/at-include
+    binary: at-include
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # This is the ONE canonical version-injection point — see the doc comment
+    # on cli.Version in internal/cli/cli.go and the build task in mise.toml.
+    # There is deliberately no main.version to keep in sync with this one.
+    ldflags:
+      - -s -w -X github.com/happycollision/at-include/internal/cli.Version={{.Version}}
+    # mod_timestamp pins the recorded build timestamp to the commit that's
+    # being built instead of "whenever this ran", so two builds of the same
+    # tag on different machines/days produce byte-identical archives.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Windows on arm64 is real (Windows 11 on ARM), but there is no evidence
+      # of user demand for it and Go's windows/arm64 support is comparatively
+      # less battle-tested than the other four combinations. The user asked
+      # for Windows only "if it is just easy" — amd64 covers the overwhelming
+      # majority of Windows users cheaply; arm64 is easy to add later behind
+      # actual demand, so it's left out rather than shipped speculatively.
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      # README.md is created by a different task; until it lands, goreleaser
+      # skips a missing "files" glob entry with a warning rather than failing
+      # the build (verified via `goreleaser build --snapshot --clean`, which
+      # succeeds today with only README.md present via LICENSE). Once the
+      # README task merges, this entry starts being packaged with no further
+      # changes needed here.
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

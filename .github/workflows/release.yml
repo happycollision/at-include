@@ -1,0 +1,37 @@
+name: Release
+
+# Fires only on version tags (e.g. v1.2.3), pushed after CI has already
+# validated the commit being tagged. goreleaser does the actual GitHub
+# Release creation, changelog, and multi-platform archive upload.
+on:
+  push:
+    tags: ["v*"]
+
+# contents: write is the minimum permission goreleaser needs to create the
+# GitHub Release and upload archives/checksums to it. No other scopes
+# (issues, pull-requests, packages, ...) are used by this workflow.
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # goreleaser's changelog generation walks commits since the previous
+          # tag, and its "current tag" detection needs the full tag history.
+          # A shallow checkout (the default) would only see the single commit
+          # the tag points at, breaking both.
+          fetch-depth: 0
+
+      - uses: jdx/mise-action@v2
+        with:
+          version: 2026.5.18
+          install: true
+          cache: true
+
+      - name: Release
+        run: goreleaser release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

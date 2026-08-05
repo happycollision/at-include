@@ -1,0 +1,57 @@
+# Git hooks for at-include's own repo.
+#
+# This file does double duty: it's what keeps *this* repo's commits clean,
+# and it's the worked example the README points readers at when it suggests
+# wiring at-include's own `--check` into a pre-push (or pre-commit) hook in
+# their own project via lefthook.
+#
+# Install locally with:
+#   mise exec -- lefthook install
+# (or just `lefthook install` if lefthook is already on PATH/shimmed).
+# `lefthook install` writes into .git/hooks/, which is untracked local state —
+# every clone of this repo needs to run it once after checkout.
+pre-commit:
+  # Jobs run in the order listed below (parallel is NOT set at this level,
+  # so it defaults to sequential — see docs/configuration/parallel.md).
+  # This matters: gofumpt below mutates .go files on disk (and re-stages the
+  # fixed versions), so it must finish completely *before* anything that
+  # reads those files — golangci-lint and go test — starts. Running gofumpt
+  # concurrently with lint/test via a blanket `parallel: true` would be a
+  # genuine data race: lint or test could read a file mid-rewrite.
+  #
+  # Once formatting is settled, lint and test don't touch each other's inputs
+  # (both are read-only against the same on-disk state), so they're grouped
+  # together and parallelized to keep the hook fast.
+  jobs:
+    - name: gofumpt
+      glob: "*.go"
+      run: gofumpt -l -w {staged_files}
+      stage_fixed: true
+
+    - group:
+        parallel: true
+        jobs:
+          - name: lint
+            glob: "*.go"
+            # Runs across the whole module rather than just staged files.
+            # golangci-lint's own config-aware caching (see .golangci.yml)
+            # keeps repeat runs fast, and whole-module analysis is what
+            # catches issues a staged-files-only run would miss (e.g. an
+            # unused export that's only unused because of an edit in a
+            # different, unstaged file). Worth the extra second or two on a
+            # module this size.
+            run: golangci-lint run
+
+          - name: test
+            glob: "*.go"
+            run: go test ./... -count=1
+
+# pre-push runs the same checks CI runs (see mise.toml's `check` task), as a
+# last local gate before code leaves the machine. It's on pre-push rather
+# than pre-commit because `mise run check` runs the full test suite plus
+# lint plus a formatting check every time — worth doing once before a push,
+# too slow to want on every single commit.
+pre-push:
+  jobs:
+    - name: check
+      run: mise run check
