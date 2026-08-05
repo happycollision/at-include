@@ -81,9 +81,13 @@ type expander struct {
 // Each file's content is inlined at most once across the whole output; later
 // references — including cycle back-edges — emit an "already inlined above"
 // marker instead, which is what makes cyclic imports terminate.
-func Flatten(opts Options) (string, int, error) {
+//
+// Named results document what the two non-error values mean (content is the
+// flattened text; inlined is the count of distinct files inlined into it) —
+// they are not used as naked returns.
+func Flatten(opts Options) (content string, inlined int, err error) {
 	e := &expander{opts: opts, inlined: map[string]bool{}}
-	content, err := e.expandFile(opts.SrcPath, nil)
+	content, err = e.expandFile(opts.SrcPath, nil)
 	if err != nil {
 		return "", 0, err
 	}

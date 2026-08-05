@@ -271,7 +271,7 @@ func compareFiles(t *testing.T, expectFiles, work string) {
 			t.Errorf("expected file %s: %v", rel, err)
 			return nil
 		}
-		if string(got) != string(want) {
+		if !bytes.Equal(got, want) {
 			t.Errorf("file %s mismatch (byte-exact compare)\n--- want ---\n%s\n--- got ---\n%s", rel, want, got)
 		}
 		return nil
