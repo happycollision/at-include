@@ -27,6 +27,24 @@ func Banner(opts Options) string {
 	}, "\n")
 }
 
+// HookPreamble renders the fixed framing text prepended to --hook-mode
+// output. Unlike Banner, it takes no Options: the wording never varies by
+// source/output name, and there is no --marker-desc-style override for it —
+// hook-mode's preamble is intentionally not configurable.
+func HookPreamble() string {
+	return strings.Join([]string{
+		"We use `@path` import syntax in Markdown docs (e.g. `AGENTS.md`) to",
+		"reference other files.",
+		"",
+		"Below, we've pre-expanded every `@import` found in `AGENTS.md`",
+		"(recursively) so you don't need to look them up.",
+		"",
+		"If you encounter an `@path` reference in some other file that wasn't",
+		"pre-expanded here, treat it as a pointer: go read that file yourself,",
+		"since it won't be auto-resolved.",
+	}, "\n")
+}
+
 // Assemble joins the banner and flattened content and normalizes the trailing
 // newline run to exactly one.
 //
