@@ -87,8 +87,9 @@ func (e *usageError) Unwrap() error { return e.err }
 // action, and returns the process exit code. Relative --src/--out/--root
 // values resolve against the process's current working directory, so the
 // same command behaves the same way regardless of where it's invoked from
-// within a repo.
-func Run(argv []string, stdout, stderr io.Writer) int {
+// within a repo. stdin supplies the source text when `--src -` is given; it
+// is otherwise unused.
+func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	opts, err := parseArgs(argv)
 	if err != nil {
 		fprintf(stderr, "%s\n\n%s", err, usage)
@@ -113,6 +114,15 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		fprintf(stderr, "at-include: %s\n", err)
 		return 1
 	}
+	if opts.src == "-" {
+		fOpts.Stdin = stdin
+	}
+
+	if opts.check && opts.src == "-" {
+		fprintf(stderr, "at-include: --check cannot be combined with --src - "+
+			"(stdin content is transient and can't be compared against on a later run)\n\n%s", usage)
+		return 2
+	}
 
 	switch {
 	case opts.listImports:
@@ -123,13 +133,6 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		return runGenerate(fOpts, stdout, stderr)
 	}
 }
-
-// stdinPlaceholder is replaced by the real stdin reader once Run threads one
-// through (a later task). It exists only so this step's tests can assert
-// fOpts.Stdin != nil without Run's signature having changed yet.
-type stdinPlaceholder struct{}
-
-func (stdinPlaceholder) Read(p []byte) (int, error) { return 0, io.EOF }
 
 // resolveOptions turns CLI strings into absolute paths and display names.
 //
@@ -193,7 +196,6 @@ func resolveOptions(o options) (flatten.Options, error) {
 		OutIsStdout: outIsStdout,
 	}
 	if srcIsStdin {
-		fOpts.Stdin = stdinPlaceholder{} // replaced with real stdin in a later task
 		fOpts.SrcPath = filepath.Join(root, "-")
 		fOpts.SrcName = "-"
 	} else {
@@ -267,7 +269,18 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 		fprintf(stderr, "at-include: %s\n", err)
 		return 1
 	}
-	assembled := flatten.Assemble(flatten.Banner(fOpts), content)
+	var assembled string
+	if fOpts.Stdin != nil {
+		assembled = assembleNoBanner(content)
+	} else {
+		assembled = flatten.Assemble(flatten.Banner(fOpts), content)
+	}
+
+	if fOpts.OutIsStdout {
+		fprint(stdout, assembled)
+		return 0
+	}
+
 	// #nosec G306 -- 0o644 is the intended permission for a generated Markdown
 	// doc meant to be read (and edited by hand between regenerations, before
 	// the "generated" banner is noticed) like any other checked-in file.
@@ -278,6 +291,16 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 	fprintf(stdout, "Generated %s from %s (%d files inlined).\n",
 		fOpts.OutName, fOpts.SrcName, inlined)
 	return 0
+}
+
+// assembleNoBanner mirrors flatten.Assemble's trailing-newline normalization
+// (exactly one trailing newline, regardless of how many the content ends
+// with) but without prepending any banner text or its "\n\n" separator —
+// flatten.Assemble("", content) would NOT work here, since Assemble's
+// TrimRight only trims from the right, leaving stray leading blank lines
+// from the empty banner + "\n\n" prefix.
+func assembleNoBanner(content string) string {
+	return strings.TrimRight(content, "\n") + "\n"
 }
 
 func runCheck(opts options, fOpts flatten.Options, stdout, stderr io.Writer) int {
@@ -298,13 +321,24 @@ func runCheck(opts options, fOpts flatten.Options, stdout, stderr io.Writer) int
 }
 
 func runListImports(fOpts flatten.Options, stdout, stderr io.Writer) int {
-	// #nosec G304 -- fOpts.SrcPath is the tool's own configured source file
-	// (the same path Flatten itself reads); --list-imports just needs the raw
-	// text to scan for @tokens instead of the fully expanded output.
-	data, err := os.ReadFile(fOpts.SrcPath)
-	if err != nil {
-		fprintf(stderr, "at-include: %s\n", err)
-		return 1
+	var data []byte
+	if fOpts.Stdin != nil {
+		var err error
+		data, err = io.ReadAll(fOpts.Stdin)
+		if err != nil {
+			fprintf(stderr, "at-include: %s\n", err)
+			return 1
+		}
+	} else {
+		// #nosec G304 -- fOpts.SrcPath is the tool's own configured source file
+		// (the same path Flatten itself reads); --list-imports just needs the raw
+		// text to scan for @tokens instead of the fully expanded output.
+		var err error
+		data, err = os.ReadFile(fOpts.SrcPath)
+		if err != nil {
+			fprintf(stderr, "at-include: %s\n", err)
+			return 1
+		}
 	}
 	for _, imp := range flatten.FindImports(string(data)) {
 		fprintf(stdout, "%s\n", imp)

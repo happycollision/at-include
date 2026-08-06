@@ -44,8 +44,9 @@ func writeTree(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// run invokes Run with cwd set to dir, returning code, stdout, stderr.
-func run(t *testing.T, dir string, argv ...string) (code int, stdout, stderr string) {
+// run invokes Run with cwd set to dir and the given stdin content, returning
+// code, stdout, stderr.
+func run(t *testing.T, dir string, argv []string, stdin string) (code int, stdout, stderr string) {
 	t.Helper()
 	prev, err := os.Getwd()
 	if err != nil {
@@ -57,13 +58,13 @@ func run(t *testing.T, dir string, argv ...string) (code int, stdout, stderr str
 	defer func() { _ = os.Chdir(prev) }()
 
 	var out, errOut bytes.Buffer
-	code = Run(argv, &out, &errOut)
+	code = Run(argv, strings.NewReader(stdin), &out, &errOut)
 	return code, out.String(), errOut.String()
 }
 
 func TestRunDefaultWritesOutput(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "Body\n\n@x.md\n", "x.md": "X-CLI\n"})
-	code, stdout, stderr := run(t, dir)
+	code, stdout, stderr := run(t, dir, []string{}, "")
 	if code != 0 {
 		t.Fatalf("code = %d, stderr = %q", code, stderr)
 	}
@@ -82,10 +83,10 @@ func TestRunDefaultWritesOutput(t *testing.T) {
 
 func TestRunCheckPassesAfterGenerate(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "Body\n\n@x.md\n", "x.md": "X\n"})
-	if code, _, se := run(t, dir); code != 0 {
+	if code, _, se := run(t, dir, []string{}, ""); code != 0 {
 		t.Fatalf("generate failed: %d %s", code, se)
 	}
-	code, stdout, _ := run(t, dir, "--check")
+	code, stdout, _ := run(t, dir, []string{"--check"}, "")
 	if code != 0 {
 		t.Errorf("code = %d, want 0; stdout = %q", code, stdout)
 	}
@@ -96,13 +97,13 @@ func TestRunCheckPassesAfterGenerate(t *testing.T) {
 
 func TestRunCheckFailsWhenStale(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "Body\n\n@x.md\n", "x.md": "X\n"})
-	if code, _, se := run(t, dir); code != 0 {
+	if code, _, se := run(t, dir, []string{}, ""); code != 0 {
 		t.Fatalf("generate failed: %d %s", code, se)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "AGENTS.src.md"), []byte("CHANGED\n\n@x.md\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	code, stdout, _ := run(t, dir, "--check")
+	code, stdout, _ := run(t, dir, []string{"--check"}, "")
 	if code != 1 {
 		t.Errorf("code = %d, want 1", code)
 	}
@@ -121,7 +122,7 @@ func TestRunCheckFailsWhenStale(t *testing.T) {
 
 func TestRunCheckMissingOutputFails(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "Body\n"})
-	code, stdout, _ := run(t, dir, "--check")
+	code, stdout, _ := run(t, dir, []string{"--check"}, "")
 	if code != 1 {
 		t.Errorf("code = %d, want 1", code)
 	}
@@ -137,7 +138,7 @@ func TestRunCheckMissingOutputFails(t *testing.T) {
 // the CLI's behavior contract, not stdout.
 func TestRunCheckRuntimeErrorGoesToStderr(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "@a.md\n", "a.md": "DEEP\n"})
-	code, stdout, stderr := run(t, dir, "--check", "--max-depth", "0")
+	code, stdout, stderr := run(t, dir, []string{"--check", "--max-depth", "0"}, "")
 	if code != 1 {
 		t.Errorf("code = %d, want 1", code)
 	}
@@ -152,7 +153,7 @@ func TestRunCheckRuntimeErrorGoesToStderr(t *testing.T) {
 func TestRunHelp(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "x\n"})
 	for _, flag := range []string{"--help", "-h"} {
-		code, stdout, _ := run(t, dir, flag)
+		code, stdout, _ := run(t, dir, []string{flag}, "")
 		if code != 0 {
 			t.Errorf("%s: code = %d, want 0", flag, code)
 		}
@@ -164,7 +165,7 @@ func TestRunHelp(t *testing.T) {
 
 func TestRunUnknownFlagIsUsageError(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "x\n"})
-	code, _, stderr := run(t, dir, "--bogus")
+	code, _, stderr := run(t, dir, []string{"--bogus"}, "")
 	if code != 2 {
 		t.Errorf("code = %d, want 2", code)
 	}
@@ -177,12 +178,12 @@ func TestRunMaxDepth(t *testing.T) {
 	files := map[string]string{"AGENTS.src.md": "@a.md\n", "a.md": "@b.md\n", "b.md": "DEEP\n"}
 
 	dir := writeTree(t, files)
-	if code, _, se := run(t, dir, "--max-depth", "2"); code != 0 {
+	if code, _, se := run(t, dir, []string{"--max-depth", "2"}, ""); code != 0 {
 		t.Errorf("maxDepth 2: code = %d, want 0; stderr = %q", code, se)
 	}
 
 	dir2 := writeTree(t, files)
-	code, _, stderr := run(t, dir2, "--max-depth", "1")
+	code, _, stderr := run(t, dir2, []string{"--max-depth", "1"}, "")
 	if code != 1 {
 		t.Errorf("maxDepth 1: code = %d, want 1", code)
 	}
@@ -231,7 +232,7 @@ func TestRunMaxDepthInvalidValues(t *testing.T) {
 	// only ever needs a plain non-negative integer, and strconv.Atoi rejects
 	// all three forms.
 	for _, v := range []string{"notanumber", "", "-1", "1.5", "1e2", "0x10", "1_000"} {
-		code, _, stderr := run(t, dir, "--max-depth", v)
+		code, _, stderr := run(t, dir, []string{"--max-depth", v}, "")
 		if code != 2 {
 			t.Errorf("--max-depth %q: code = %d, want 2", v, code)
 		}
@@ -239,7 +240,7 @@ func TestRunMaxDepthInvalidValues(t *testing.T) {
 			t.Errorf("--max-depth %q: stderr = %q", v, stderr)
 		}
 	}
-	code, _, stderr := run(t, dir, "--max-depth")
+	code, _, stderr := run(t, dir, []string{"--max-depth"}, "")
 	if code != 2 {
 		t.Errorf("--max-depth with no value: code = %d, want 2", code)
 	}
@@ -254,7 +255,7 @@ func TestRunCustomSrcOutAndRoot(t *testing.T) {
 		"docs/notes.md":      "NOTES\n",
 	})
 	code, stdout, stderr := run(t, dir,
-		"--src", "docs/CLAUDE.src.md", "--out", "docs/CLAUDE.md", "--root", ".")
+		[]string{"--src", "docs/CLAUDE.src.md", "--out", "docs/CLAUDE.md", "--root", "."}, "")
 	if code != 0 {
 		t.Fatalf("code = %d, stderr = %q", code, stderr)
 	}
@@ -275,7 +276,7 @@ func TestRunCustomSrcOutAndRoot(t *testing.T) {
 
 func TestRunMissingSourceIsRuntimeError(t *testing.T) {
 	dir := writeTree(t, map[string]string{"other.md": "x\n"})
-	code, _, stderr := run(t, dir)
+	code, _, stderr := run(t, dir, []string{}, "")
 	if code != 1 {
 		t.Errorf("code = %d, want 1", code)
 	}
@@ -288,7 +289,7 @@ func TestRunListImports(t *testing.T) {
 	dir := writeTree(t, map[string]string{
 		"AGENTS.src.md": "@a.md and `@b.md` and @c.md\n",
 	})
-	code, stdout, stderr := run(t, dir, "--list-imports")
+	code, stdout, stderr := run(t, dir, []string{"--list-imports"}, "")
 	if code != 0 {
 		t.Fatalf("code = %d, stderr = %q", code, stderr)
 	}
@@ -302,7 +303,7 @@ func TestRunListImports(t *testing.T) {
 
 func TestRunVersion(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "x\n"})
-	code, stdout, _ := run(t, dir, "--version")
+	code, stdout, _ := run(t, dir, []string{"--version"}, "")
 	if code != 0 {
 		t.Errorf("code = %d, want 0", code)
 	}
@@ -313,7 +314,7 @@ func TestRunVersion(t *testing.T) {
 
 func TestRunMarkerDescOverride(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "@x.md\n", "x.md": "X\n"})
-	if code, _, se := run(t, dir, "--marker-desc", "custom wording"); code != 0 {
+	if code, _, se := run(t, dir, []string{"--marker-desc", "custom wording"}, ""); code != 0 {
 		t.Fatalf("code = %d, stderr = %q", code, se)
 	}
 	written, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
@@ -338,7 +339,7 @@ func TestRunOutSameAsSrcIsRejected(t *testing.T) {
 	const original = "AUTHORED SOURCE\n\n@x.md\n"
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": original, "x.md": "X\n"})
 
-	code, stdout, stderr := run(t, dir, "--out", "AGENTS.src.md")
+	code, stdout, stderr := run(t, dir, []string{"--out", "AGENTS.src.md"}, "")
 	if code != 2 {
 		t.Errorf("code = %d, want 2 (usage error)", code)
 	}
@@ -370,7 +371,7 @@ func TestRunOutSameAsSrcDifferentSpellingIsRejected(t *testing.T) {
 	// no-op comparison of the raw strings would catch trivially — this
 	// exercises the filepath.Abs + filepath.Clean normalization, not just an
 	// exact string match.
-	code, _, stderr := run(t, dir, "--out", "./AGENTS.src.md")
+	code, _, stderr := run(t, dir, []string{"--out", "./AGENTS.src.md"}, "")
 	if code != 2 {
 		t.Errorf("code = %d, want 2", code)
 	}
@@ -394,7 +395,7 @@ func TestRunOutSymlinkToSrcIsRejected(t *testing.T) {
 		t.Fatalf("Symlink: %v", err)
 	}
 
-	code, _, stderr := run(t, dir, "--out", "link.md")
+	code, _, stderr := run(t, dir, []string{"--out", "link.md"}, "")
 	if code != 2 {
 		t.Errorf("code = %d, want 2", code)
 	}
@@ -416,7 +417,7 @@ func TestRunOutDifferentFromSrcStillWorks(t *testing.T) {
 	// happens to share a directory (or a name prefix) with --src, but is not
 	// actually the same file, must still generate normally.
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "Body\n\n@x.md\n", "x.md": "X\n"})
-	code, _, stderr := run(t, dir, "--out", "AGENTS.src.md.generated")
+	code, _, stderr := run(t, dir, []string{"--out", "AGENTS.src.md.generated"}, "")
 	if code != 0 {
 		t.Fatalf("code = %d, stderr = %q", code, stderr)
 	}
@@ -502,14 +503,14 @@ func TestRunCheckSuggestionRoundTrips(t *testing.T) {
 		"docs/notes.md":      "NOTES\n",
 	})
 	argv := []string{"--src", "docs/CLAUDE.src.md", "--out", "docs/CLAUDE.md", "--root", "."}
-	if code, _, se := run(t, dir, argv...); code != 0 {
+	if code, _, se := run(t, dir, argv, ""); code != 0 {
 		t.Fatalf("initial generate failed: %d %s", code, se)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "docs", "CLAUDE.src.md"), []byte("CHANGED\n\n@notes.md\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	code, stdout, stderr := run(t, dir, "--check", "--src", "docs/CLAUDE.src.md", "--out", "docs/CLAUDE.md", "--root", ".")
+	code, stdout, stderr := run(t, dir, []string{"--check", "--src", "docs/CLAUDE.src.md", "--out", "docs/CLAUDE.md", "--root", "."}, "")
 	if code != 1 {
 		t.Fatalf("--check should fail while stale: code = %d, stderr = %q", code, stderr)
 	}
@@ -525,13 +526,13 @@ func TestRunCheckSuggestionRoundTrips(t *testing.T) {
 	}
 
 	suggestedArgv := strings.Fields(suggestedLine)[1:] // drop the leading "at-include"
-	if code, _, se := run(t, dir, suggestedArgv...); code != 0 {
+	if code, _, se := run(t, dir, suggestedArgv, ""); code != 0 {
 		t.Fatalf("following the suggested command failed: %d %s", code, se)
 	}
 
 	// The suggested command's argv plus --check must now report up to date.
 	checkArgv := append(append([]string{}, suggestedArgv...), "--check")
-	code, stdout, stderr = run(t, dir, checkArgv...)
+	code, stdout, stderr = run(t, dir, checkArgv, "")
 	if code != 0 {
 		t.Fatalf("--check after following the suggestion should pass: code = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 	}
@@ -579,8 +580,11 @@ func TestResolveOptionsSrcDashSetsStdinModeAndCwdRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveOptions: %v", err)
 	}
-	if fOpts.Stdin == nil {
-		t.Error("Stdin should be set (non-nil) when --src is -")
+	// resolveOptions itself no longer sets fOpts.Stdin (Run does, since it's
+	// the one holding the real io.Reader); resolveOptions signals stdin mode
+	// via SrcName/SrcPath instead.
+	if fOpts.SrcName != "-" {
+		t.Errorf("SrcName = %q, want %q (stdin mode when --src is -)", fOpts.SrcName, "-")
 	}
 	if fOpts.RootDir != dir {
 		t.Errorf("RootDir = %q, want %q (CWD default when --src is -)", fOpts.RootDir, dir)
@@ -709,5 +713,96 @@ func TestShellQuoteRoundTripsThroughShell(t *testing.T) {
 		if string(out) != in {
 			t.Errorf("round-trip through sh: input %q, quoted %q, got back %q", in, quoted, string(out))
 		}
+	}
+}
+
+func TestRunSrcDashReadsStdinAndWritesStdout(t *testing.T) {
+	dir := writeTree(t, map[string]string{"x.md": "X-CONTENT\n"})
+	code, stdout, stderr := run(t, dir, []string{"--src", "-"}, "Body\n\n@x.md\n")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "X-CONTENT") {
+		t.Errorf("stdout = %q, want it to contain X-CONTENT", stdout)
+	}
+	if strings.Contains(stdout, "[!IMPORTANT]") {
+		t.Errorf("stdout should not contain the generated-file banner: %q", stdout)
+	}
+	if strings.Contains(stdout, "Generated") {
+		t.Errorf("stdout should not contain the success message when --out is stdout: %q", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(err) {
+		t.Error("--src - with no --out must not write AGENTS.md")
+	}
+}
+
+func TestRunSrcDashEmptyStdinIsNotAnError(t *testing.T) {
+	dir := writeTree(t, map[string]string{})
+	code, stdout, stderr := run(t, dir, []string{"--src", "-"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if stdout != "\n" && stdout != "" {
+		t.Errorf("stdout = %q, want empty (or a single trailing newline)", stdout)
+	}
+}
+
+func TestRunSrcDashOutToRealFileSkipsBanner(t *testing.T) {
+	dir := writeTree(t, map[string]string{"x.md": "X\n"})
+	code, _, stderr := run(t, dir, []string{"--src", "-", "--out", "result.md"}, "@x.md\n")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	written, err := os.ReadFile(filepath.Join(dir, "result.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(written), "[!IMPORTANT]") {
+		t.Errorf("output file should not contain the banner when --src is -: %s", written)
+	}
+	if !strings.Contains(string(written), "X\n") {
+		t.Errorf("output file should contain flattened content: %s", written)
+	}
+}
+
+func TestRunSrcRealOutDashStillShowsBanner(t *testing.T) {
+	dir := writeTree(t, map[string]string{"AGENTS.src.md": "Body\n\n@x.md\n", "x.md": "X\n"})
+	code, stdout, stderr := run(t, dir, []string{"--out", "-"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "[!IMPORTANT]") {
+		t.Errorf("stdout should contain the banner when --src is a real file: %q", stdout)
+	}
+	if strings.Contains(stdout, "Generated") {
+		t.Errorf("stdout should not contain the success message when --out is stdout: %q", stdout)
+	}
+	if !strings.Contains(stdout, "--out -") {
+		t.Errorf("banner's regenerate command should mention --out - (not a wrong AGENTS.md fallback): %q", stdout)
+	}
+}
+
+func TestRunCheckWithSrcDashIsUsageError(t *testing.T) {
+	dir := writeTree(t, map[string]string{})
+	code, _, stderr := run(t, dir, []string{"--check", "--src", "-"}, "Body\n")
+	if code != 2 {
+		t.Errorf("code = %d, want 2 (usage error)", code)
+	}
+	if !strings.Contains(stderr, "--check") {
+		t.Errorf("stderr should mention --check, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "--src -") && !strings.Contains(stderr, "stdin") {
+		t.Errorf("stderr should explain --check can't be combined with stdin source, got %q", stderr)
+	}
+}
+
+func TestRunListImportsSrcDash(t *testing.T) {
+	dir := writeTree(t, map[string]string{})
+	code, stdout, stderr := run(t, dir, []string{"--list-imports", "--src", "-"}, "@a.md and `@b.md` and @c.md\n")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if got, want := stdout, "a.md\nc.md\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
 	}
 }
