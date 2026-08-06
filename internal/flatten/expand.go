@@ -80,8 +80,9 @@ type expander struct {
 	count   int
 }
 
-// Flatten reads opts.SrcPath and returns its text with every resolvable @path
-// import replaced by the imported file's (recursively flattened) contents.
+// Flatten reads opts.SrcPath (or opts.Stdin, when non-nil) and returns its
+// text with every resolvable @path import replaced by the imported file's
+// (recursively flattened) contents.
 //
 // Each file's content is inlined at most once across the whole output; later
 // references — including cycle back-edges — emit an "already inlined above"
