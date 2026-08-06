@@ -146,6 +146,28 @@ Exit codes: 0 success, 1 out-of-date or runtime error, 2 usage error.
 `--out` may never resolve to the same file as `--src` — at-include refuses to
 run rather than risk overwriting your hand-authored source.
 
+## Piping stdin/stdout
+
+`--src -` reads the source text from stdin instead of a file; when `--out`
+isn't given explicitly, the flattened result is written to stdout instead of
+`AGENTS.md`. `--out -` also writes to stdout, whether or not `--src` is `-`.
+
+```sh
+printf 'Body\n\n@notes.md\n' | at-include --src -
+```
+
+Relative `@path` tokens found in piped content resolve against the current
+working directory (or `--root`, if given) — there's no source file to derive
+a directory from. The generated-file banner is never printed when `--src` is
+`-`, since there's no real source filename for it to point at; the tool
+otherwise flattens stdin exactly the same way it flattens a file, including
+recursively reading real `@path` files from disk.
+
+`--check` cannot be combined with `--src -`: `--check`'s whole point is
+detecting whether a source *file* changed without the output being
+regenerated, which needs a stable, re-readable file — piped content is
+transient. `--list-imports` works fine with `--src -`, same as with a file.
+
 ## Use it as CI tooling
 
 `--check` is the star here: it regenerates the output in memory, compares it

@@ -42,9 +42,10 @@ real file with that file's contents (recursively), and writes the result.
 Options:
   (no args)           Generate and write the output file
   --check             Verify the output file is up to date; exit nonzero if not
-  --src <path>        Source file (default: AGENTS.src.md)
-  --out <path>        Output file (default: AGENTS.md)
-  --root <path>       Root for marker paths (default: the source file's directory)
+  --src <path>        Source file (default: AGENTS.src.md); "-" reads from stdin
+  --out <path>        Output file (default: AGENTS.md); "-" writes to stdout
+  --root <path>       Root for marker paths (default: the source file's directory,
+                       or the current directory when --src is "-")
   --max-depth <n>     Error if a resolved import chain exceeds n hops
   --marker-desc <s>   Override the text in "Contents of X (<s>):"
   --list-imports      Print the @path candidates found in the source, one per line
@@ -52,6 +53,12 @@ Options:
   --help, -h          Show this help
 
 Exit codes: 0 success, 1 out-of-date or runtime error, 2 usage error.
+
+Notes on --src -:
+  --check cannot be combined with --src - (stdin content isn't a stable basis
+  for an "is the output stale" comparison). --out defaults to stdout when
+  --src is - and --out isn't given explicitly. The generated-file banner is
+  never printed when --src is -.
 `
 
 // options holds the parsed command line, before paths are resolved against a
