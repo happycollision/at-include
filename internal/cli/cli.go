@@ -42,9 +42,10 @@ real file with that file's contents (recursively), and writes the result.
 Options:
   (no args)           Generate and write the output file
   --check             Verify the output file is up to date; exit nonzero if not
-  --src <path>        Source file (default: AGENTS.src.md)
-  --out <path>        Output file (default: AGENTS.md)
-  --root <path>       Root for marker paths (default: the source file's directory)
+  --src <path>        Source file (default: AGENTS.src.md); "-" reads from stdin
+  --out <path>        Output file (default: AGENTS.md); "-" writes to stdout
+  --root <path>       Root for marker paths (default: the source file's directory,
+                      or the current directory when --src is "-")
   --max-depth <n>     Error if a resolved import chain exceeds n hops
   --marker-desc <s>   Override the text in "Contents of X (<s>):"
   --list-imports      Print the @path candidates found in the source, one per line
@@ -52,6 +53,12 @@ Options:
   --help, -h          Show this help
 
 Exit codes: 0 success, 1 out-of-date or runtime error, 2 usage error.
+
+Notes on --src -:
+  --check cannot be combined with --src - (stdin content isn't a stable basis
+  for an "is the output stale" comparison). --out defaults to stdout when
+  --src is - and --out isn't given explicitly. The generated-file banner is
+  never printed when --src is -.
 `
 
 // options holds the parsed command line, before paths are resolved against a
@@ -63,6 +70,7 @@ type options struct {
 	listImports   bool
 	src           string
 	out           string
+	outSet        bool
 	root          string
 	rootSet       bool
 	markerDesc    string
@@ -86,8 +94,9 @@ func (e *usageError) Unwrap() error { return e.err }
 // action, and returns the process exit code. Relative --src/--out/--root
 // values resolve against the process's current working directory, so the
 // same command behaves the same way regardless of where it's invoked from
-// within a repo.
-func Run(argv []string, stdout, stderr io.Writer) int {
+// within a repo. stdin supplies the source text when `--src -` is given; it
+// is otherwise unused.
+func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	opts, err := parseArgs(argv)
 	if err != nil {
 		fprintf(stderr, "%s\n\n%s", err, usage)
@@ -112,6 +121,15 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		fprintf(stderr, "at-include: %s\n", err)
 		return 1
 	}
+	if opts.src == "-" {
+		fOpts.Stdin = stdin
+	}
+
+	if opts.check && opts.src == "-" {
+		fprintf(stderr, "at-include: --check cannot be combined with --src - "+
+			"(stdin content is transient and can't be compared against on a later run)\n\n%s", usage)
+		return 2
+	}
 
 	switch {
 	case opts.listImports:
@@ -124,36 +142,78 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 }
 
 // resolveOptions turns CLI strings into absolute paths and display names.
+//
+// "--src -" and "--out -" are sentinels for stdin/stdout rather than literal
+// filenames named "-": when present, filepath.Abs and the same-path collision
+// check are skipped for that side entirely, since "-" never refers to a real
+// file on disk and comparing it against the other side would be meaningless.
 func resolveOptions(o options) (flatten.Options, error) {
-	src, err := filepath.Abs(o.src)
-	if err != nil {
-		return flatten.Options{}, err
+	srcIsStdin := o.src == "-"
+	outIsStdout := o.out == "-" || (srcIsStdin && !o.outSet)
+
+	var src string
+	if !srcIsStdin {
+		var err error
+		src, err = filepath.Abs(o.src)
+		if err != nil {
+			return flatten.Options{}, err
+		}
 	}
-	out, err := filepath.Abs(o.out)
-	if err != nil {
-		return flatten.Options{}, err
+
+	var out string
+	if !outIsStdout {
+		var err error
+		out, err = filepath.Abs(o.out)
+		if err != nil {
+			return flatten.Options{}, err
+		}
 	}
-	if samePath(src, out) {
+
+	if !srcIsStdin && !outIsStdout && samePath(src, out) {
 		return flatten.Options{}, &usageError{fmt.Errorf(
 			"--out must not be the same file as --src (both resolve to %s); "+
 				"this would overwrite the hand-authored source", filepath.Clean(src))}
 	}
-	root := filepath.Dir(src)
-	if o.rootSet {
-		if root, err = filepath.Abs(o.root); err != nil {
+
+	root := ""
+	switch {
+	case o.rootSet:
+		var err error
+		root, err = filepath.Abs(o.root)
+		if err != nil {
 			return flatten.Options{}, err
 		}
+	case srcIsStdin:
+		var err error
+		root, err = os.Getwd()
+		if err != nil {
+			return flatten.Options{}, err
+		}
+	default:
+		root = filepath.Dir(src)
 	}
-	return flatten.Options{
+
+	fOpts := flatten.Options{
 		SrcPath:     src,
 		OutPath:     out,
 		RootDir:     root,
 		MaxDepth:    o.maxDepth,
 		MaxDepthSet: o.maxDepthSet,
 		MarkerDesc:  o.markerDesc,
-		SrcName:     displayName(root, src, o.src),
-		OutName:     displayName(root, out, o.out),
-	}, nil
+		OutIsStdout: outIsStdout,
+	}
+	if srcIsStdin {
+		fOpts.SrcPath = filepath.Join(root, "-")
+		fOpts.SrcName = "-"
+	} else {
+		fOpts.SrcName = displayName(root, src, o.src)
+	}
+	if outIsStdout {
+		fOpts.OutName = "-"
+	} else {
+		fOpts.OutName = displayName(root, out, o.out)
+	}
+	return fOpts, nil
 }
 
 // samePath reports whether two absolute paths name the same file on disk.
@@ -216,7 +276,18 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 		fprintf(stderr, "at-include: %s\n", err)
 		return 1
 	}
-	assembled := flatten.Assemble(flatten.Banner(fOpts), content)
+	var assembled string
+	if fOpts.Stdin != nil {
+		assembled = assembleNoBanner(content)
+	} else {
+		assembled = flatten.Assemble(flatten.Banner(fOpts), content)
+	}
+
+	if fOpts.OutIsStdout {
+		fprint(stdout, assembled)
+		return 0
+	}
+
 	// #nosec G306 -- 0o644 is the intended permission for a generated Markdown
 	// doc meant to be read (and edited by hand between regenerations, before
 	// the "generated" banner is noticed) like any other checked-in file.
@@ -227,6 +298,16 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 	fprintf(stdout, "Generated %s from %s (%d files inlined).\n",
 		fOpts.OutName, fOpts.SrcName, inlined)
 	return 0
+}
+
+// assembleNoBanner mirrors flatten.Assemble's trailing-newline normalization
+// (exactly one trailing newline, regardless of how many the content ends
+// with) but without prepending any banner text or its "\n\n" separator —
+// flatten.Assemble("", content) would NOT work here, since Assemble's
+// TrimRight only trims from the right, leaving stray leading blank lines
+// from the empty banner + "\n\n" prefix.
+func assembleNoBanner(content string) string {
+	return strings.TrimRight(content, "\n") + "\n"
 }
 
 func runCheck(opts options, fOpts flatten.Options, stdout, stderr io.Writer) int {
@@ -247,13 +328,24 @@ func runCheck(opts options, fOpts flatten.Options, stdout, stderr io.Writer) int
 }
 
 func runListImports(fOpts flatten.Options, stdout, stderr io.Writer) int {
-	// #nosec G304 -- fOpts.SrcPath is the tool's own configured source file
-	// (the same path Flatten itself reads); --list-imports just needs the raw
-	// text to scan for @tokens instead of the fully expanded output.
-	data, err := os.ReadFile(fOpts.SrcPath)
-	if err != nil {
-		fprintf(stderr, "at-include: %s\n", err)
-		return 1
+	var data []byte
+	if fOpts.Stdin != nil {
+		var err error
+		data, err = io.ReadAll(fOpts.Stdin)
+		if err != nil {
+			fprintf(stderr, "at-include: %s\n", err)
+			return 1
+		}
+	} else {
+		// #nosec G304 -- fOpts.SrcPath is the tool's own configured source file
+		// (the same path Flatten itself reads); --list-imports just needs the raw
+		// text to scan for @tokens instead of the fully expanded output.
+		var err error
+		data, err = os.ReadFile(fOpts.SrcPath)
+		if err != nil {
+			fprintf(stderr, "at-include: %s\n", err)
+			return 1
+		}
 	}
 	for _, imp := range flatten.FindImports(string(data)) {
 		fprintf(stdout, "%s\n", imp)
@@ -364,7 +456,7 @@ func parseArgs(argv []string) (options, error) {
 			if err != nil {
 				return o, err
 			}
-			o.out = v
+			o.out, o.outSet = v, true
 		case "--root":
 			v, err := value(argv, &i, a)
 			if err != nil {

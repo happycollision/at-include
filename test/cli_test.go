@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -106,6 +107,7 @@ func runCase(t *testing.T, caseDir string) {
 
 	cmd := exec.Command(absBin, argv...)
 	cmd.Dir = work
+	cmd.Stdin = readOptionalStdin(t, filepath.Join(caseDir, "stdin"))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
@@ -155,6 +157,23 @@ func readArgv(t *testing.T, path string) []string {
 		argv = append(argv, strings.TrimSpace(line))
 	}
 	return argv
+}
+
+// readOptionalStdin returns a reader over the case's stdin fixture file, or
+// nil (meaning "no stdin piped", i.e. the process's stdin behaves as an
+// already-closed/empty source) when the file is absent — most cases don't
+// pipe anything in, and cmd.Stdin == nil is exec.Cmd's normal way of saying
+// that.
+func readOptionalStdin(t *testing.T, path string) io.Reader {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("read stdin fixture: %v", err)
+	}
+	return bytes.NewReader(data)
 }
 
 func readExpectedExit(t *testing.T, path string) int {

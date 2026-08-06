@@ -2,6 +2,7 @@ package flatten
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,18 @@ type Options struct {
 	MarkerDesc  string
 	SrcName     string
 	OutName     string
+
+	// Stdin, when non-nil, is read for the top-level source text instead of
+	// opts.SrcPath. Every recursive @path import still reads from disk via
+	// os.ReadFile exactly as always — only the initial call reads from here.
+	Stdin io.Reader
+
+	// OutIsStdout signals that the caller intends to write the result to
+	// stdout rather than a file. flatten itself never writes output (that's
+	// the CLI layer's job via Assemble + a Writer) — this field exists purely
+	// so cli.go can decide banner/success-message behavior from a single
+	// flatten.Options value alongside Stdin, without a second parallel struct.
+	OutIsStdout bool
 }
 
 func (o Options) markerDesc() string {
@@ -74,8 +87,9 @@ type expander struct {
 	count   int
 }
 
-// Flatten reads opts.SrcPath and returns its text with every resolvable @path
-// import replaced by the imported file's (recursively flattened) contents.
+// Flatten reads opts.SrcPath (or opts.Stdin, when non-nil) and returns its
+// text with every resolvable @path import replaced by the imported file's
+// (recursively flattened) contents.
 //
 // Each file's content is inlined at most once across the whole output; later
 // references — including cycle back-edges — emit an "already inlined above"
@@ -86,7 +100,24 @@ type expander struct {
 // they are not used as naked returns.
 func Flatten(opts Options) (content string, inlined int, err error) {
 	e := &expander{opts: opts, inlined: map[string]bool{}}
-	content, err = e.expandFile(opts.SrcPath, 0)
+	var text string
+	if opts.Stdin != nil {
+		data, readErr := io.ReadAll(opts.Stdin)
+		if readErr != nil {
+			return "", 0, readErr
+		}
+		text = string(data)
+	} else {
+		// #nosec G304 G703 -- opts.SrcPath is the tool's own configured source
+		// file; reading arbitrary caller-chosen files is this tool's entire
+		// purpose (see the identical comment on expandFile's os.ReadFile call).
+		data, readErr := os.ReadFile(opts.SrcPath)
+		if readErr != nil {
+			return "", 0, readErr
+		}
+		text = string(data)
+	}
+	content, err = e.transform(text, opts.SrcPath, 0)
 	if err != nil {
 		return "", 0, err
 	}

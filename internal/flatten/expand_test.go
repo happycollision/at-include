@@ -540,3 +540,48 @@ func TestFlattenCustomMarkerDesc(t *testing.T) {
 		t.Errorf("content should not contain the default marker desc\ngot:\n%s", content)
 	}
 }
+
+func TestFlattenReadsFromStdinWhenSet(t *testing.T) {
+	dir := t.TempDir()
+	xPath := filepath.Join(dir, "x.md")
+	if err := os.WriteFile(xPath, []byte("X-CONTENT\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	opts := Options{
+		SrcPath: filepath.Join(dir, "STDIN-SENTINEL-NOT-A-REAL-FILE.md"),
+		RootDir: dir,
+		Stdin:   strings.NewReader("Body\n\n@x.md\n"),
+	}
+	content, inlined, err := Flatten(opts)
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if inlined != 1 {
+		t.Errorf("inlined = %d, want 1", inlined)
+	}
+	if !strings.Contains(content, "X-CONTENT") {
+		t.Errorf("content = %q, want it to contain X-CONTENT", content)
+	}
+	if !strings.Contains(content, "Contents of x.md") {
+		t.Errorf("content = %q, want an inline marker for x.md", content)
+	}
+}
+
+func TestFlattenStdinEmptyIsNotAnError(t *testing.T) {
+	opts := Options{
+		SrcPath: filepath.Join(t.TempDir(), "unused.md"),
+		RootDir: t.TempDir(),
+		Stdin:   strings.NewReader(""),
+	}
+	content, inlined, err := Flatten(opts)
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if content != "" {
+		t.Errorf("content = %q, want empty", content)
+	}
+	if inlined != 0 {
+		t.Errorf("inlined = %d, want 0", inlined)
+	}
+}

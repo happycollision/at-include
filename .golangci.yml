@@ -35,14 +35,17 @@ linters:
         - ifElseChain
       settings:
         hugeParam:
-          # flatten.Options (112 bytes) and cli.options (96 bytes) are passed
-          # by value throughout as an established package convention (an
+          # flatten.Options (128 bytes, after adding the Stdin io.Reader
+          # field; was 112 bytes) and cli.options (96 bytes) are passed by
+          # value throughout as an established package convention (an
           # immutable, small config struct, not a hot-path allocation
           # concern). Raising the threshold above both sizes avoids
           # pointerizing them purely for lint appeasement, which would add
-          # aliasing risk for no behavioral benefit. See task notes / review
+          # aliasing risk for no behavioral benefit. 144 gives the same
+          # headroom above the new 128-byte size that the old 128 threshold
+          # gave above the previous 112-byte size. See task notes / review
           # history for the explicit decision.
-          sizeThreshold: 128
+          sizeThreshold: 144
   exclusions:
     rules:
       # gosec's file/dir-permission and G304-path-taint checks are relevant to

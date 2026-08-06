@@ -24,6 +24,7 @@ Each directory under `test/cases/<name>/` is one test case:
 | Path             | Meaning                                                                                             | Required |
 |------------------|------------------------------------------------------------------------------------------------------|----------|
 | `cmd`            | Argv for the binary, one token per line. Blank lines and `#`-comment lines are ignored.               | No — absent means "no arguments" |
+| `stdin`          | Content piped to the binary's stdin.                                                              | No — absent means no stdin piped (nil, same as an unredirected empty read) |
 | `files/`         | A tree copied into a fresh temp dir; the binary runs with this temp dir as its working directory.     | No — absent means "empty working directory" |
 | `expect/exit`    | Expected process exit code, as a bare integer.                                                        | No — absent means `0` |
 | `expect/stdout`  | Expected stdout. See "Trailing newline policy" and "Substring matching" below.                        | No — absent means "don't check stdout" |
