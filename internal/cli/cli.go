@@ -35,9 +35,11 @@ const (
 
 const usage = `Usage: at-include [options]
 
-Flatten @<path> Markdown imports, the way Claude Code inlines files referenced
-from a CLAUDE.md. Reads a source file, replaces every @<path> that resolves to a
-real file with that file's contents (recursively), and writes the result.
+Flatten @<path> Markdown imports, following the same conventions Claude Code
+uses to inline files referenced from a CLAUDE.md. Reads a source file, replaces
+every @<path> that resolves to a real file with that file's contents
+(recursively), and writes the result. Close to Claude Code's behavior by intent,
+but an independent implementation — not guaranteed to match it exactly.
 
 Options:
   (no args)           Generate and write the output file

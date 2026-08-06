@@ -188,7 +188,12 @@ func (e *expander) transformLine(line, importerDir string, depth int) (string, e
 		if ok {
 			b.WriteString(expansion)
 		} else {
-			b.WriteString("@" + piece.Text)
+			// piece.Text is the resolution candidate (unescaped, fragment
+			// stripped), so a literal passthrough writes piece.Raw instead to
+			// reproduce the source byte for byte: an unresolvable
+			// "@a\ b.md#frag" stays exactly that, rather than collapsing to
+			// "@a b.md".
+			b.WriteString("@" + piece.Raw)
 		}
 	}
 	return b.String(), nil

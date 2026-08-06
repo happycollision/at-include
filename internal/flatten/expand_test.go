@@ -111,6 +111,128 @@ func TestFlattenLeavesUnresolvableTokensLiteral(t *testing.T) {
 	}
 }
 
+// TestFlattenEmailNeverImportsEvenWhenCandidateFileExists is the case that
+// proves the token-boundary rule does real work rather than being masked by
+// paths that happen not to resolve: "bar.com" exists here as a regular file,
+// and it still must not be inlined, because the '@' in foo@bar.com follows a
+// word character. Verified against Claude Code with the same setup — it emits
+// no "Contents of .../bar.com" marker.
+func TestFlattenEmailNeverImportsEvenWhenCandidateFileExists(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md": "Reach out to foo@bar.com for questions.\n",
+		"bar.com":       "EMAIL-CANDIDATE-CONTENT\n",
+	})
+	content, inlined, err := Flatten(optsFor(root))
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if inlined != 0 {
+		t.Errorf("inlined = %d, want 0", inlined)
+	}
+	if strings.Contains(content, "EMAIL-CANDIDATE-CONTENT") {
+		t.Errorf("email inlined a real file it must not touch\ngot:\n%s", content)
+	}
+	if content != "Reach out to foo@bar.com for questions.\n" {
+		t.Errorf("content = %q, want it unchanged", content)
+	}
+}
+
+// TestFlattenFragmentSuffixResolvesBasePath pins '#' truncation end to end: the
+// fragment is dropped for resolution, the base file is inlined, and the
+// fragment text does not survive in the output (it was consumed as part of the
+// token's extent).
+func TestFlattenFragmentSuffixResolvesBasePath(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md": "See @guide.md#setup for details\n",
+		"guide.md":      "GUIDE-CONTENT\n",
+	})
+	content, inlined, err := Flatten(optsFor(root))
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if inlined != 1 {
+		t.Errorf("inlined = %d, want 1", inlined)
+	}
+	if !strings.Contains(content, "GUIDE-CONTENT") {
+		t.Errorf("content missing inlined body\ngot:\n%s", content)
+	}
+	if !strings.Contains(content, "Contents of guide.md") {
+		t.Errorf("marker should name the base path, not the fragment\ngot:\n%s", content)
+	}
+	if strings.Contains(content, "#setup") {
+		t.Errorf("fragment text should not survive in output\ngot:\n%s", content)
+	}
+}
+
+// An unresolvable token must be written back byte for byte, fragment and
+// escapes intact — the scanner strips both to build the resolution candidate,
+// so the expander relies on linePiece.Raw to avoid silently rewriting prose
+// that was never an import.
+func TestFlattenUnresolvableTokenPreservesFragmentAndEscapes(t *testing.T) {
+	t.Parallel()
+	for _, line := range []string{
+		"See @nope.md#setup here\n",
+		"See @no\\ such/file.md#frag here\n",
+		"Bare @nope.md#a#b here\n",
+	} {
+		root := makeTree(t, map[string]string{"AGENTS.src.md": line})
+		content, inlined, err := Flatten(optsFor(root))
+		if err != nil {
+			t.Fatalf("Flatten: %v", err)
+		}
+		if inlined != 0 {
+			t.Errorf("inlined = %d, want 0", inlined)
+		}
+		if content != line {
+			t.Errorf("content = %q, want it unchanged (%q)", content, line)
+		}
+	}
+}
+
+func TestFlattenInlinesEscapedSpacePath(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md":    "Top\n\n@my\\ notes/file.md\n\nBottom\n",
+		"my notes/file.md": "SPACED CONTENT\n",
+	})
+	content, inlined, err := Flatten(optsFor(root))
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if !strings.Contains(content, "SPACED CONTENT") {
+		t.Errorf("content missing inlined body\ngot:\n%s", content)
+	}
+	// The marker renders the real (unescaped) path, matching the file on disk.
+	if !strings.Contains(content, "Contents of my notes/file.md") {
+		t.Errorf("content missing unescaped marker path\ngot:\n%s", content)
+	}
+	if inlined != 1 {
+		t.Errorf("inlined = %d, want 1", inlined)
+	}
+}
+
+// An escaped-space token that does not resolve must be written back exactly as
+// authored, backslash included — the scanner unescapes the token text, so the
+// expander has to re-escape when it puts the literal back.
+func TestFlattenLeavesUnresolvableEscapedSpaceTokenVerbatim(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md": "Use @no\\ such/file.md here\n",
+	})
+	content, inlined, err := Flatten(optsFor(root))
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if want := "Use @no\\ such/file.md here"; !strings.Contains(content, want) {
+		t.Errorf("content missing %q\ngot:\n%s", want, content)
+	}
+	if inlined != 0 {
+		t.Errorf("inlined = %d, want 0", inlined)
+	}
+}
+
 func TestFlattenDiamondEmitsSingleCopy(t *testing.T) {
 	t.Parallel()
 	root := makeTree(t, map[string]string{
@@ -286,10 +408,15 @@ func TestFlattenPreservesFencedAndInlineCode(t *testing.T) {
 // backtick run is emitted literally as plain text, and scanning continues so
 // a subsequent @token on the same line still expands normally. The want
 // string is the pinned golden output for this input.
+//
+// The @token is separated from the backtick run by a space on purpose: a '@'
+// sitting directly against the backtick would not be at a token boundary (see
+// atTokenBoundary in scan.go), which would test the boundary rule instead of
+// the unterminated-run branch this case exists to cover.
 func TestFlattenUnterminatedBacktickStillExpandsToken(t *testing.T) {
 	t.Parallel()
 	root := makeTree(t, map[string]string{
-		"AGENTS.src.md": "`@a.md and more\n",
+		"AGENTS.src.md": "` @a.md and more\n",
 		"a.md":          "A-CONTENT\n",
 	})
 	content, inlined, err := Flatten(optsFor(root))
@@ -299,12 +426,34 @@ func TestFlattenUnterminatedBacktickStillExpandsToken(t *testing.T) {
 	if inlined != 1 {
 		t.Errorf("inlined = %d, want 1", inlined)
 	}
-	want := "`Contents of a.md (project instructions, checked into the codebase):\n" +
+	want := "` Contents of a.md (project instructions, checked into the codebase):\n" +
 		"\n" +
 		"A-CONTENT\n" +
 		" and more\n"
 	if content != want {
 		t.Errorf("content = %q\nwant      %q", content, want)
+	}
+}
+
+// TestFlattenBacktickAdjacentTokenStaysLiteral is the companion to the case
+// above: with the space removed, the '@' is no longer at a token boundary, so
+// nothing expands even though a.md exists. Verified against Claude Code, which
+// likewise inlines nothing for "`@a.md".
+func TestFlattenBacktickAdjacentTokenStaysLiteral(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md": "`@a.md and more\n",
+		"a.md":          "A-CONTENT\n",
+	})
+	content, inlined, err := Flatten(optsFor(root))
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if inlined != 0 {
+		t.Errorf("inlined = %d, want 0", inlined)
+	}
+	if content != "`@a.md and more\n" {
+		t.Errorf("content = %q, want it unchanged", content)
 	}
 }
 
@@ -447,7 +596,10 @@ func TestFlattenAbsolutePathToken(t *testing.T) {
 	absTarget := filepath.Join(root, "outside", "z.md")
 	srcDir := makeTree(t, map[string]string{}) // separate importer directory
 	srcPath := filepath.Join(srcDir, "AGENTS.src.md")
-	if err := os.WriteFile(srcPath, []byte("X@"+absTarget+"\n"), 0o644); err != nil {
+	// "X " (with the space) keeps a preceding literal in play to prove it is
+	// not eaten, while leaving the '@' at a valid token boundary — "X@" would
+	// make the '@' mid-word and expand nothing (see atTokenBoundary).
+	if err := os.WriteFile(srcPath, []byte("X @"+absTarget+"\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	opts := optsFor(srcDir)

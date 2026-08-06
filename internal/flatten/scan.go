@@ -1,6 +1,14 @@
-// Package flatten implements the @path import flattening rules that Claude Code
-// applies when it reads a CLAUDE.md/AGENTS.md file: an @-prefixed token that
+// Package flatten implements @path import flattening modeled on what Claude
+// Code does when it reads a CLAUDE.md/AGENTS.md file: an @-prefixed token that
 // resolves to a real file is replaced by that file's contents, recursively.
+//
+// The rules here were derived from observed Claude Code behavior and are meant
+// to agree with it in intent and in ordinary use, but this is an independent
+// implementation rather than a port, and exact parity is neither claimed nor
+// guaranteed. Upstream's import handling is largely undocumented and may change
+// between releases; known differences and the drift risk are discussed in
+// docs/architecture.md. Where the two disagree, this package's tests define the
+// behavior.
 package flatten
 
 import (
@@ -19,9 +27,14 @@ import (
 //
 // We deliberately accept looser delimiter lines than CommonMark proper:
 // unlimited leading indentation (CommonMark caps it at 3 spaces) and closer
-// lines with trailing text after the run of fence characters. This is the
-// behavior Claude Code itself uses when inlining @-imports, which is what
-// this tool reproduces.
+// lines with trailing text after the run of fence characters. The intent is to
+// skip anything a reader would recognize as a code fence, erring toward not
+// expanding rather than expanding something inside an example block.
+//
+// Note this is a line-oriented approximation, not the mechanism Claude Code
+// uses: upstream runs its import scan over parsed Markdown token nodes and
+// skips the ones typed code/codespan. The two agree on ordinary documents, but
+// unusual Markdown may partition differently — see docs/architecture.md.
 type fenceState struct {
 	open bool
 	char byte // '`' or '~'
@@ -70,8 +83,13 @@ func (f *fenceState) step(line string) (isDelim, inFence bool) {
 // text to copy through unchanged (which may be an inline code span, copied
 // backticks and all) or an '@' token candidate (Text holds the text after
 // the '@', not including it, when IsToken is true).
+// Raw holds the token's original source text after the '@' (escapes and '#'
+// fragment intact) when IsToken is true, so the expander can put an
+// unresolvable token back byte for byte. Text is the resolution candidate:
+// unescaped and fragment-stripped.
 type linePiece struct {
 	Text    string
+	Raw     string
 	IsToken bool
 }
 
@@ -93,17 +111,55 @@ type linePiece struct {
 //     found before end of line, the backtick run itself is emitted as a
 //     literal piece and scanning continues normally after it (so a later '@'
 //     on the same line is still seen).
-//   - Outside a code span, '@' starts a token that runs to the next
-//     whitespace rune (unicode.IsSpace) or end of line — including through
-//     any backticks encountered along the way, which are just ordinary,
-//     non-whitespace characters once a token scan is underway.
+//   - Outside a code span, '@' starts a token only when it is at line start or
+//     immediately preceded by a whitespace rune (see atTokenBoundary). A '@'
+//     anywhere else — mid-word, after punctuation, or directly after a
+//     backtick — is ordinary literal text. This is what keeps an email's '@'
+//     from yielding a candidate at all.
+//   - A token that has opened runs to the next whitespace rune
+//     (unicode.IsSpace) or end of line — including through any backticks
+//     encountered along the way, which are just ordinary, non-whitespace
+//     characters once a token scan is underway.
+//   - The first '#' in a token begins a fragment/anchor: it and everything
+//     after it are consumed as part of the token's extent but dropped from the
+//     resolution candidate, so @a.md#frag resolves a.md.
+//   - Within a token, a backslash immediately followed by a space ("\ ")
+//     is an escaped space: it does not end the token, and it contributes a
+//     plain space to the token text. A backslash in any other position
+//     (followed by a non-space, or at end of line) ends the token and is
+//     not part of it.
 //   - Everything else is literal text.
 //
-// Scan-to-whitespace is the current assumption for where a token ends; it
-// does not support a @path containing a space (e.g. via escaping or
-// quoting). Whether Claude Code's own @-import handling supports that is a
-// separate, open question tracked outside this file — revisit this rule if
-// it turns out paths-with-spaces need to work.
+// These rules were modeled on Claude Code's own @-import scanner (as shipped in
+// 2.1.221; an undocumented detail that may change), whose token pattern is
+//
+//	/(?:^|\s)@((?:[^\s\\]|\\ )+)/g
+//
+// followed, per match, by truncation at the first '#' and then
+// replaceAll("\\ ", " ") on the remainder. The (?:^|\s) prefix is the
+// token-boundary rule; the [^\s\\]|\\ alternation is why "\ " continues a
+// token while a lone backslash terminates it; and the truncate-then-unescape
+// order is observable — in "@a\ b#c\ d.md" the '#' is found while the token is
+// still escaped, so the candidate is "a b".
+//
+// Escaping is the *only* supported way to write a @path containing a space:
+// quoting is not a mechanism (@"a b.md" yields the token `"a`), a bare space
+// always ends the token, and there is no longest-match-on-disk probing.
+//
+// All of this was verified empirically against Claude Code, not just read off
+// the pattern: with a.md, b.md, frag.md and a real file named bar.com all
+// present, a CLAUDE.md containing "`@a.md and @b.md", "@frag.md#some-section"
+// and "mail foo@bar.com" produced "Contents of ..." markers for exactly b.md
+// and frag.md — proving the boundary rule suppresses both the backtick-adjacent
+// token and the email even when the email's candidate exists on disk.
+//
+// One upstream layer is intentionally not reproduced: after truncating and
+// unescaping, Claude Code applies acceptance filters to the candidate (it
+// rejects paths starting with '@' or with a leading [#%^&*()], and otherwise
+// requires a leading [a-zA-Z0-9._-] unless the path starts with "./", "~/", or
+// "/"). Here such candidates are simply allowed to fail to resolve, which
+// yields the same observable outcome — literal passthrough — without a second
+// notion of validity.
 func scanLine(line string) []linePiece {
 	var pieces []linePiece
 	var lit strings.Builder
@@ -130,16 +186,54 @@ func scanLine(line string) []linePiece {
 			lit.WriteString(closer + line[i:i+closeIdx] + closer)
 			i += closeIdx + ticks
 		case '@':
+			// The '@' only opens a token at line start or immediately after
+			// whitespace. Anywhere else (mid-word, after punctuation) it is
+			// ordinary literal text — which is what keeps an email's '@' from
+			// producing a candidate at all.
+			if !atTokenBoundary(line, i) {
+				lit.WriteByte('@')
+				i++
+				continue
+			}
+			var tok strings.Builder
+			truncated := false // a '#' was seen: stop adding to tok, keep consuming
 			j := i + 1
 			for j < len(line) {
+				if line[j] == '\\' {
+					// "\ " is an escaped space: consume both bytes and emit
+					// one plain space. A backslash in any other position
+					// ends the token without being part of it.
+					if j+1 < len(line) && line[j+1] == ' ' {
+						if !truncated {
+							tok.WriteByte(' ')
+						}
+						j += 2
+						continue
+					}
+					break
+				}
 				r, size := utf8.DecodeRuneInString(line[j:])
 				if unicode.IsSpace(r) {
 					break
 				}
+				// The first '#' begins a fragment: it and everything after it
+				// are dropped from the resolved path, but still consumed as
+				// part of the token's extent so they are not re-scanned as
+				// literal text.
+				if line[j] == '#' {
+					truncated = true
+				}
+				if !truncated {
+					tok.WriteString(line[j : j+size])
+				}
 				j += size
 			}
 			flushLiteral()
-			pieces = append(pieces, linePiece{Text: line[i+1 : j], IsToken: true})
+			pieces = append(pieces, linePiece{
+				Text:    tok.String(),
+				Raw:     line[i+1 : j],
+				IsToken: true,
+			})
 			i = j
 		default:
 			r, size := utf8.DecodeRuneInString(line[i:])
@@ -149,6 +243,21 @@ func scanLine(line string) []linePiece {
 	}
 	flushLiteral()
 	return pieces
+}
+
+// atTokenBoundary reports whether the '@' at byte offset i may open a token:
+// true only at line start or when the immediately preceding rune is
+// whitespace, mirroring the (?:^|\s) prefix of Claude Code's import pattern.
+//
+// The preceding rune is decoded with DecodeLastRuneInString so a multi-byte
+// space (NBSP, U+3000) counts as whitespace just as it does when terminating a
+// token, rather than being misread as a trailing continuation byte.
+func atTokenBoundary(line string, i int) bool {
+	if i == 0 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(line[:i])
+	return unicode.IsSpace(r)
 }
 
 // FindImports returns the @path candidates in text, in document order and

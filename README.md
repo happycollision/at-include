@@ -1,8 +1,20 @@
 # at-include
 
-Flatten `@<path>` Markdown imports the way [Claude Code](https://claude.com/claude-code)
-inlines files referenced from a `CLAUDE.md` — as a standalone CLI you can run
-anywhere: locally, in CI, or from a git hook.
+Flatten `@<path>` Markdown imports, following the same conventions
+[Claude Code](https://claude.com/claude-code) uses to inline files referenced
+from a `CLAUDE.md` — as a standalone CLI you can run anywhere: locally, in CI,
+or from a git hook.
+
+> [!NOTE]
+> `at-include` is an independent implementation, not a port of Claude Code and
+> not affiliated with it. The goal is to behave the *same way in intent* on the
+> `@`-import syntax people actually write, and the rules below were checked
+> against real Claude Code behavior — but exact parity is not promised. Claude
+> Code's import handling is largely undocumented and free to change between
+> releases, so some differences already exist (see
+> [`docs/architecture.md`](docs/architecture.md)) and some drift over time is
+> expected. If your output has to match a specific Claude Code version byte for
+> byte, verify it yourself rather than assuming.
 
 Supported platforms: Linux (amd64, arm64), macOS (amd64, arm64), Windows (amd64).
 
@@ -58,12 +70,23 @@ Contents of notes.md (project instructions, checked into the codebase):
 
 ## The `@path` rules
 
+These are `at-include`'s own rules. They were derived from, and spot-checked
+against, real Claude Code behavior, so they should match what you see there for
+ordinary usage — but they are this tool's contract, not a specification of
+Claude Code's. Treat them as authoritative for `at-include` and as a good guide
+to (not a guarantee of) Claude Code.
+
 | Token | Behavior |
 |---|---|
 | `@notes.md` where `notes.md` exists (relative to the **importing file's** directory, or as an absolute path) | Expanded: replaced with the file's contents, recursively |
 | `@nope.md` where the path doesn't exist | Left literal — never an error |
 | `@some-dir` where the path is a directory, not a regular file | Left literal — never an error |
-| `foo@bar.com` (email) | Left literal — never scanned as an import |
+| `foo@bar.com` (email) | Left literal — a `@` must be at line start or right after whitespace to start a token, so an email's `@` is never scanned at all (this holds even if a file named `bar.com` exists) |
+| `x@notes.md`, `(@notes.md`, `` `@notes.md `` (any `@` not preceded by whitespace) | Left literal — same boundary rule |
+| `@notes.md#section` (fragment suffix) | Expanded: everything from the first `#` is a fragment and is dropped, so this imports `notes.md` |
+| `@my\ notes/file.md` (backslash-escaped space) | Expanded if `my notes/file.md` exists — `\ ` is the **only** supported way to write a path containing a space |
+| `@my notes/file.md` (bare space) | The token ends at the space, so only `@my` is considered — left literal |
+| `@"my notes/file.md"` (quoted) | Quoting is not a mechanism; the token is `"my` — left literal |
 | `@scope/package` (npm-style package mention) | Left literal unless a file with that literal path actually exists |
 | `` `@notes.md` `` inside an inline code span | Never expanded — code spans are passed through verbatim |
 | `@notes.md` inside a fenced code block | Never expanded — fenced blocks are skipped entirely, delimiters and all |
@@ -124,16 +147,19 @@ Or download a release archive directly from the
 ```
 Usage: at-include [options]
 
-Flatten @<path> Markdown imports, the way Claude Code inlines files referenced
-from a CLAUDE.md. Reads a source file, replaces every @<path> that resolves to a
-real file with that file's contents (recursively), and writes the result.
+Flatten @<path> Markdown imports, following the same conventions Claude Code
+uses to inline files referenced from a CLAUDE.md. Reads a source file, replaces
+every @<path> that resolves to a real file with that file's contents
+(recursively), and writes the result. Close to Claude Code's behavior by intent,
+but an independent implementation — not guaranteed to match it exactly.
 
 Options:
   (no args)           Generate and write the output file
   --check             Verify the output file is up to date; exit nonzero if not
-  --src <path>        Source file (default: AGENTS.src.md)
-  --out <path>        Output file (default: AGENTS.md)
-  --root <path>       Root for marker paths (default: the source file's directory)
+  --src <path>        Source file (default: AGENTS.src.md); "-" reads from stdin
+  --out <path>        Output file (default: AGENTS.md); "-" writes to stdout
+  --root <path>       Root for marker paths (default: the source file's directory,
+                      or the current directory when --src is "-")
   --max-depth <n>     Error if a resolved import chain exceeds n hops
   --marker-desc <s>   Override the text in "Contents of X (<s>):"
   --list-imports      Print the @path candidates found in the source, one per line
@@ -141,6 +167,12 @@ Options:
   --help, -h          Show this help
 
 Exit codes: 0 success, 1 out-of-date or runtime error, 2 usage error.
+
+Notes on --src -:
+  --check cannot be combined with --src - (stdin content isn't a stable basis
+  for an "is the output stale" comparison). --out defaults to stdout when
+  --src is - and --out isn't given explicitly. The generated-file banner is
+  never printed when --src is -.
 ```
 
 `--out` may never resolve to the same file as `--src` — at-include refuses to

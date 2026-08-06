@@ -1,7 +1,18 @@
 # at-include — agent instructions
 
-`at-include` flattens `@<path>` Markdown imports the way Claude Code inlines
-`@`-referenced files from a `CLAUDE.md`.
+`at-include` flattens `@<path>` Markdown imports, following the same
+conventions Claude Code uses to inline `@`-referenced files from a `CLAUDE.md`.
+
+**Do not treat parity with Claude Code as the spec.** The resemblance is by
+intent, but this is an independent implementation: upstream's import handling is
+largely undocumented, some differences are deliberate, and drift over releases
+is expected. So when you are tempted to change behavior "to match Claude Code":
+this project's own tests and fixtures are the contract, and a divergence is only
+a bug if it breaks them or a documented rule in `README.md`. If you do want to
+close a gap, establish the upstream behavior empirically first (never guess),
+pin the new behavior with tests, and update the known-differences list in
+`docs/architecture.md` — don't silently swap one undocumented assumption for
+another.
 
 **Output compatibility is what matters** — the generated file's content
 (banner, `Contents of X (...)` markers, blank-line placement, single trailing

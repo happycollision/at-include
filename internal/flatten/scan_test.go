@@ -30,8 +30,31 @@ func TestFindImports(t *testing.T) {
 			[]string{"real.md"},
 		},
 		{"ignores tilde fenced block", strings.Join([]string{"~~~", "@nope.md", "~~~"}, "\n"), nil},
-		{"email is a candidate by its @-token", "mail foo@bar.com", []string{"bar.com"}},
+		// The '@' must sit at line start or immediately after whitespace, so an
+		// email's '@' (preceded by a word character) yields no candidate at
+		// all — matching Claude Code's (?:^|\s)@ boundary.
+		{"email yields no candidate at all", "mail foo@bar.com", nil},
+		{"@ after a word character is not a token", "a@b.md", nil},
+		{"@ after punctuation is not a token", "(@a.md", nil},
+		{"@ at line start is a token", "@a.md", []string{"a.md"}},
+		{"@ after a tab is a token", "\t@a.md", []string{"a.md"}},
+		{"@ after a newline-adjacent space is a token", "x @a.md", []string{"a.md"}},
+		{"second @ in a run is not its own token", "@@a.md", []string{"@a.md"}},
 		{"token stops at whitespace, keeps punctuation", "@a/b.md, next", []string{"a/b.md,"}},
+
+		// A '#' truncates the token: everything from the first '#' onward is a
+		// fragment/anchor and is dropped before resolution, so @a.md#frag
+		// resolves a.md — matching Claude Code's indexOf("#") truncation.
+		{"fragment suffix is truncated", "@a.md#section", []string{"a.md"}},
+		{"only the first # matters", "@a.md#a#b", []string{"a.md"}},
+		{"fragment truncation composes with unescaping", "@my\\ notes/f.md#frag", []string{"my notes/f.md"}},
+		// Truncation runs on the still-escaped token, before "\ " is
+		// unescaped, so an escaped space *after* the '#' is discarded along
+		// with the rest of the fragment. This case is what distinguishes the
+		// two possible orderings; upstream truncates first.
+		{"truncation precedes unescaping", "@a\\ b#c\\ d.md", []string{"a b"}},
+		{"a token that is only a fragment yields nothing", "@#frag", nil},
+		{"# inside a fenced block is still skipped", "```\n@a.md#f\n```", nil},
 		{
 			"longer outer fence not closed by shorter inner fence",
 			strings.Join([]string{
@@ -45,7 +68,12 @@ func TestFindImports(t *testing.T) {
 			strings.Join([]string{"```", "~~~", "@a.md", "```", "@b.md"}, "\n"),
 			[]string{"b.md"},
 		},
-		{"unterminated backtick run keeps scanning", "`@a.md and @b.md", []string{"a.md", "b.md"}},
+		// An unterminated backtick run is emitted as literal text and scanning
+		// continues, but the '@' directly after it is no longer at a token
+		// boundary, so only the later whitespace-preceded '@' is a candidate.
+		// Verified against Claude Code: with a.md and b.md both present, only
+		// b.md is inlined.
+		{"unterminated backtick run keeps scanning", "`@a.md and @b.md", []string{"b.md"}},
 		{"double-backtick span needs a double closer", "``@a.md `@b.md` @c.md``", nil},
 		{"indented fence still opens", strings.Join([]string{"  ```", "@a.md", "  ```"}, "\n"), nil},
 		{"bare @ with nothing after it yields nothing", "@ and @", nil},
@@ -72,6 +100,45 @@ func TestFindImports(t *testing.T) {
 			"multi-byte non-space runes are preserved in a token",
 			"@caf" + eAcute + "/r" + eAcute + "sum" + eAcute + ".md",
 			[]string{"caf" + eAcute + "/r" + eAcute + "sum" + eAcute + ".md"},
+		},
+
+		// Backslash-escaped spaces: the one mechanism Claude Code provides
+		// for a @path containing a space. A "\ " pair continues the token
+		// and is unescaped to a plain space in the reported candidate; a
+		// bare (unescaped) space still ends the token.
+		{"escaped space continues a token", "@my\\ notes/file.md", []string{"my notes/file.md"}},
+		{
+			"multiple escaped spaces in one token",
+			"@a\\ b\\ c/file.md",
+			[]string{"a b c/file.md"},
+		},
+		{
+			"escaped-space token still ends at the next bare space",
+			"@my\\ notes/file.md and more",
+			[]string{"my notes/file.md"},
+		},
+		{
+			"escaped space mid-line among other tokens",
+			"see @a\\ b.md then @c.md",
+			[]string{"a b.md", "c.md"},
+		},
+		{"bare space still ends a token (unescaped)", "@my notes/file.md", []string{"my"}},
+		{"double quotes are not an escaping mechanism", `@"q notes/file.md"`, []string{`"q`}},
+		{"single quotes are not an escaping mechanism", "@'q notes/file.md'", []string{"'q"}},
+		{
+			"a backslash not followed by a space ends the token",
+			"@a\\b.md",
+			[]string{"a"},
+		},
+		{
+			"trailing backslash at end of line ends the token",
+			"@a.md\\",
+			[]string{"a.md"},
+		},
+		{
+			"escaped space immediately after the @ is kept",
+			"@\\ leading.md",
+			[]string{" leading.md"},
 		},
 
 		{"fence opened but never closed at EOF swallows everything after it", "```\n@hidden.md\n", nil},
