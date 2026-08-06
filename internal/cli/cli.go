@@ -44,6 +44,10 @@ but an independent implementation — not guaranteed to match it exactly.
 Options:
   (no args)           Generate and write the output file
   --check             Verify the output file is up to date; exit nonzero if not
+  --hook-mode         Prepend a fixed @import-explainer preamble instead of the
+                      generated-file banner; --src defaults to AGENTS.md and
+                      --out defaults to stdout. For piping into an agent
+                      lifecycle hook, not for writing a checked-in file.
   --src <path>        Source file (default: AGENTS.src.md); "-" reads from stdin
   --out <path>        Output file (default: AGENTS.md); "-" writes to stdout
   --root <path>       Root for marker paths (default: the source file's directory,
@@ -70,7 +74,9 @@ type options struct {
 	help          bool
 	version       bool
 	listImports   bool
+	hookMode      bool
 	src           string
+	srcSet        bool
 	out           string
 	outSet        bool
 	root          string
@@ -441,6 +447,8 @@ func parseArgs(argv []string) (options, error) {
 		switch a := argv[i]; a {
 		case "--check":
 			o.check = true
+		case "--hook-mode":
+			o.hookMode = true
 		case "--help", "-h":
 			o.help = true
 		case "--version":
@@ -452,7 +460,7 @@ func parseArgs(argv []string) (options, error) {
 			if err != nil {
 				return o, err
 			}
-			o.src = v
+			o.src, o.srcSet = v, true
 		case "--out":
 			v, err := value(argv, &i, a)
 			if err != nil {

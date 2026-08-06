@@ -226,6 +226,37 @@ func TestParseArgsMaxDepthGrammar(t *testing.T) {
 	}
 }
 
+func TestParseArgsHookModeFlag(t *testing.T) {
+	o, err := parseArgs([]string{"--hook-mode"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if !o.hookMode {
+		t.Error("want hookMode = true")
+	}
+}
+
+func TestParseArgsSrcSetTracksExplicitFlag(t *testing.T) {
+	o, err := parseArgs([]string{})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if o.srcSet {
+		t.Error("want srcSet = false when --src is not passed")
+	}
+
+	o, err = parseArgs([]string{"--src", "custom.md"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if !o.srcSet {
+		t.Error("want srcSet = true when --src is passed")
+	}
+	if o.src != "custom.md" {
+		t.Errorf("src = %q, want %q", o.src, "custom.md")
+	}
+}
+
 func TestRunMaxDepthInvalidValues(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "x\n"})
 	// "1e2", "0x10", and "1_000" are deliberately included here: --max-depth
