@@ -7,23 +7,33 @@ name: Release smoke test
 # misnamed asset, a platform archive that failed to upload, or version metadata
 # lost between goreleaser and the shipped binary.
 #
-# This is a separate workflow rather than a job appended to release.yml, for
-# two reasons:
+# Triggering — and why this is NOT `release: types: [published]`:
 #
-#   1. It avoids a race. A `needs: goreleaser` job starts the instant
-#      goreleaser's step exits, but mise resolves versions through the GitHub
-#      releases API, which is cached and eventually consistent — and mise
-#      caches that response on disk too. The `release: published` event, by
-#      contrast, fires only after GitHub has created the release and attached
-#      its assets, so the artifact this job installs is guaranteed to be
-#      queryable. That removes the need for a retry/wait loop entirely, and a
-#      flaky release gate is worse than no gate.
-#   2. It can be re-run on demand against any past release via
-#      workflow_dispatch, which is also how it gets verified without cutting a
-#      throwaway release.
+# This workflow originally keyed on `release: published`, on the reasoning that
+# the event fires only after GitHub has created the release and attached its
+# assets, which would sidestep any race. That reasoning was wrong in a way that
+# made the gate silently dead: GitHub does not dispatch workflow-triggering
+# events for actions taken with the default GITHUB_TOKEN, to prevent recursive
+# workflow loops. goreleaser creates the release with secrets.GITHUB_TOKEN, so
+# the `release: published` event is suppressed. Verified on the v0.2.0 release
+# (2026-08-06): the release published fine with all six assets, and no
+# `release`-event run was created at all.
+#
+# Two ways to make it actually fire: create the release with a PAT or GitHub App
+# token so the event is dispatched, or hang the check off the Release workflow
+# run itself. The latter wins — no extra secret to store and rotate, and it
+# keeps working for a fork or a re-run — at the cost of having to handle the
+# API-visibility race ourselves rather than assuming it away. Hence the
+# explicit wait step below.
+#
+# `workflow_run` (not a `needs:` job inside release.yml) keeps this a separate
+# file, so it can still be re-run on demand against any past release via
+# workflow_dispatch, and a red smoke test is reported distinctly from a failed
+# release rather than being buried in the release run.
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -39,6 +49,13 @@ permissions:
 
 jobs:
   smoke-test:
+    # On a workflow_run trigger, only proceed if the Release workflow actually
+    # succeeded — a failed or cancelled release has nothing worth smoke-testing,
+    # and letting it through would report a confusing second failure. A manual
+    # workflow_dispatch always proceeds.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -52,13 +69,24 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
+      # On a workflow_run trigger, checkout defaults to the repository's default
+      # branch, NOT the ref that triggered the upstream run — so without an
+      # explicit ref this would run whatever version of the smoke-test script is
+      # on master, rather than the one from the commit actually being released.
+      # Pin it to the triggering run's SHA (empty for workflow_dispatch, where
+      # the default branch is the right choice).
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       # Resolve which version to test, without a hardcoded number anywhere.
       #
-      # For a `release` event the tag comes from the event payload. For a
-      # manual dispatch it comes from the optional input, falling back to
-      # whatever GitHub currently considers the latest release.
+      # For a workflow_run trigger the tag comes from the triggering Release
+      # run's head_branch: release.yml is `on: push: tags`, so its head_branch
+      # is the tag ref that started it (e.g. "v0.2.0") — confirmed against the
+      # v0.1.1 and v0.2.0 release runs, whose headBranch values are exactly the
+      # tags. For a manual dispatch it comes from the optional input, falling
+      # back to whatever GitHub currently considers the latest release.
       #
       # Two values come out of this: the tag (e.g. "v0.1.1") and the bare
       # version (e.g. "0.1.1"). They are NOT interchangeable. goreleaser sets
@@ -70,19 +98,65 @@ jobs:
         id: version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVENT_TAG: ${{ github.event.release.tag_name }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
           INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          tag="${EVENT_TAG:-${INPUT_TAG:-}}"
+          tag="${RUN_TAG:-${INPUT_TAG:-}}"
           if [ -z "$tag" ]; then
             tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
             echo "No tag given; using the latest release."
           fi
+          # Guard against a workflow_run from something that wasn't a tag push
+          # (e.g. a re-run of Release against a branch): the smoke test only
+          # means anything against a real release tag.
+          case "$tag" in
+            v[0-9]*) ;;
+            *) echo "::error::Refusing to smoke-test '$tag': not a version tag." >&2; exit 1 ;;
+          esac
           version="${tag#v}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Testing tag $tag (expecting binary version $version)."
+        shell: bash
+
+      # Wait for the release to be queryable before installing.
+      #
+      # This is the race the original `release: published` design existed to
+      # avoid, and now has to be handled directly. Two distinct things can lag
+      # after goreleaser exits:
+      #
+      #   1. The release/assets appearing in the API. Measured on v0.2.0: assets
+      #      reached state "uploaded" at 13:28:37 and published_at was 13:28:38,
+      #      i.e. already settled when goreleaser finished — so this is usually
+      #      a no-op, but it costs one API call to be sure.
+      #   2. mise's own view of it. mise resolves versions through the GitHub
+      #      releases API and caches the response on disk
+      #      (~/.cache/mise/github/*-all-releases-*.msgpack.z), so a stale
+      #      "no such version" answer can persist. MISE_FETCH_REMOTE_VERSIONS_TIMEOUT
+      #      doesn't help; the fix is to not have a warm cache, which a fresh
+      #      runner guarantees (cache: false on mise-action below), plus this
+      #      poll confirming the version is actually listed before we install.
+      #
+      # Polls for up to ~2 minutes. A flaky release gate is worse than none, so
+      # this fails loudly rather than proceeding into a confusing install error.
+      - name: Wait for the release to be queryable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+                 --json assets --jq '.assets[].name' 2>/dev/null | grep -q .; then
+              echo "Release $TAG is queryable with assets (attempt $attempt)."
+              exit 0
+            fi
+            echo "Release $TAG not queryable yet; retrying in 5s (attempt $attempt/24)."
+            sleep 5
+          done
+          echo "::error::Release $TAG never became queryable." >&2
+          exit 1
         shell: bash
 
       # A consumer-shaped mise.toml, generated at runtime so no release version
