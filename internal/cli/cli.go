@@ -119,6 +119,21 @@ func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	if opts.hookMode {
+		if !opts.srcSet {
+			opts.src = "AGENTS.md"
+		}
+		if !opts.outSet {
+			opts.out = "-"
+		}
+	}
+
+	if opts.check && opts.hookMode {
+		fprintf(stderr, "at-include: --check cannot be combined with --hook-mode "+
+			"(--check compares against an on-disk generated file; hook mode has no such file)\n\n%s", usage)
+		return 2
+	}
+
 	fOpts, err := resolveOptions(opts)
 	if err != nil {
 		var uerr *usageError
@@ -138,6 +153,8 @@ func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			"(stdin content is transient and can't be compared against on a later run)\n\n%s", usage)
 		return 2
 	}
+
+	fOpts.HookMode = opts.hookMode
 
 	switch {
 	case opts.listImports:
@@ -285,9 +302,12 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 		return 1
 	}
 	var assembled string
-	if fOpts.Stdin != nil {
+	switch {
+	case fOpts.HookMode:
+		assembled = flatten.Assemble(flatten.HookPreamble(), content)
+	case fOpts.Stdin != nil:
 		assembled = assembleNoBanner(content)
-	} else {
+	default:
 		assembled = flatten.Assemble(flatten.Banner(fOpts), content)
 	}
 
@@ -303,8 +323,10 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 		fprintf(stderr, "at-include: %s\n", err)
 		return 1
 	}
-	fprintf(stdout, "Generated %s from %s (%d files inlined).\n",
-		fOpts.OutName, fOpts.SrcName, inlined)
+	if !fOpts.HookMode {
+		fprintf(stdout, "Generated %s from %s (%d files inlined).\n",
+			fOpts.OutName, fOpts.SrcName, inlined)
+	}
 	return 0
 }
 

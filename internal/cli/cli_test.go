@@ -837,3 +837,72 @@ func TestRunListImportsSrcDash(t *testing.T) {
 		t.Errorf("stdout = %q, want %q", got, want)
 	}
 }
+
+func TestRunHookModeDefaultsSrcToAgentsAndOutToStdout(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"AGENTS.md": "Body\n\n@x.md\n",
+		"x.md":      "X-HOOK\n",
+	})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "X-HOOK") {
+		t.Errorf("stdout should contain expanded content, got %q", stdout)
+	}
+	if !strings.Contains(stdout, "pre-expanded") {
+		t.Errorf("stdout should contain the hook preamble, got %q", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md.generated")); err == nil {
+		t.Error("hook mode must not write any output file")
+	}
+}
+
+func TestRunHookModeExplicitOutStillWritesFile(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"AGENTS.md": "Body\n\n@x.md\n",
+		"x.md":      "X-HOOK\n",
+	})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--out", "hook-context.md"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("explicit file --out should not also print to stdout, got %q", stdout)
+	}
+	written, err := os.ReadFile(filepath.Join(dir, "hook-context.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(written), "X-HOOK") || !strings.Contains(string(written), "pre-expanded") {
+		t.Errorf("written file looks wrong:\n%s", written)
+	}
+}
+
+func TestRunHookModeExplicitSrcOverridesDefault(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"custom.md": "Body\n\n@x.md\n",
+		"x.md":      "X-CUSTOM\n",
+	})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--src", "custom.md"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "X-CUSTOM") {
+		t.Errorf("stdout should contain custom.md's expansion, got %q", stdout)
+	}
+}
+
+func TestRunHookModeCheckIsRejected(t *testing.T) {
+	dir := writeTree(t, map[string]string{"AGENTS.md": "Body\n"})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--check"}, "")
+	if code != 2 {
+		t.Errorf("code = %d, want 2 (usage error)", code)
+	}
+	if stdout != "" {
+		t.Errorf("stdout should be empty on this usage error, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "--hook-mode") || !strings.Contains(stderr, "--check") || !strings.Contains(stderr, "Usage") {
+		t.Errorf("stderr should mention both flags and usage, got %q", stderr)
+	}
+}
