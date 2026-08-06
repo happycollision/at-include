@@ -45,7 +45,7 @@ Options:
   --src <path>        Source file (default: AGENTS.src.md); "-" reads from stdin
   --out <path>        Output file (default: AGENTS.md); "-" writes to stdout
   --root <path>       Root for marker paths (default: the source file's directory,
-                       or the current directory when --src is "-")
+                      or the current directory when --src is "-")
   --max-depth <n>     Error if a resolved import chain exceeds n hops
   --marker-desc <s>   Override the text in "Contents of X (<s>):"
   --list-imports      Print the @path candidates found in the source, one per line
