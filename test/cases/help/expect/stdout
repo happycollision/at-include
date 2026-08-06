@@ -2,6 +2,7 @@
 Usage: at-include [options]
 Options:
 --check
+--hook-mode
 --src <path>
 --version
 --help, -h
