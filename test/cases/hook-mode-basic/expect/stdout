@@ -1,5 +1,15 @@
-~
-@path
-pre-expanded
+We use `@path` import syntax in Markdown docs (e.g. `AGENTS.md`) to
+reference other files.
+
+Below, we've pre-expanded every `@import` found in `AGENTS.md`
+(recursively) so you don't need to look them up.
+
+If you encounter an `@path` reference in some other file that wasn't
+pre-expanded here, treat it as a pointer: go read that file yourself,
+since it won't be auto-resolved.
+
 Project body text.
+
+Contents of x.md (project instructions, checked into the codebase):
+
 X-FIXTURE-CONTENT
