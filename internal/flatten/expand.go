@@ -39,6 +39,12 @@ type Options struct {
 	// so cli.go can decide banner/success-message behavior from a single
 	// flatten.Options value alongside Stdin, without a second parallel struct.
 	OutIsStdout bool
+
+	// HookMode signals that Generate should prepend HookPreamble() instead of
+	// Banner(opts). Intended for a lifecycle-hook invocation (e.g. Codex's
+	// SessionStart) whose stdout is injected as model context rather than
+	// written to a file — see docs/superpowers/specs/2026-08-06-hook-mode-design.md.
+	HookMode bool
 }
 
 func (o Options) markerDesc() string {
