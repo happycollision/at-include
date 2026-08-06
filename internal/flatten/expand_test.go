@@ -517,6 +517,30 @@ func TestFlattenTokenOutsideRootDirUsesDotDot(t *testing.T) {
 // every inline marker. optsFor deliberately leaves MarkerDesc unset so the
 // rest of the suite exercises the default branch instead; this is the one
 // test for the non-default path.
+func TestFlattenCustomMarkerDesc(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.src.md": "@a.md\n",
+		"a.md":          "A-CONTENT\n",
+	})
+	opts := optsFor(root)
+	opts.MarkerDesc = "custom marker text"
+	content, inlined, err := Flatten(opts)
+	if err != nil {
+		t.Fatalf("Flatten: %v", err)
+	}
+	if inlined != 1 {
+		t.Errorf("inlined = %d, want 1", inlined)
+	}
+	want := "Contents of a.md (custom marker text):\n\nA-CONTENT\n\n"
+	if content != want {
+		t.Errorf("content = %q, want %q", content, want)
+	}
+	if strings.Contains(content, DefaultMarkerDesc) {
+		t.Errorf("content should not contain the default marker desc\ngot:\n%s", content)
+	}
+}
+
 func TestFlattenReadsFromStdinWhenSet(t *testing.T) {
 	dir := t.TempDir()
 	xPath := filepath.Join(dir, "x.md")
@@ -559,29 +583,5 @@ func TestFlattenStdinEmptyIsNotAnError(t *testing.T) {
 	}
 	if inlined != 0 {
 		t.Errorf("inlined = %d, want 0", inlined)
-	}
-}
-
-func TestFlattenCustomMarkerDesc(t *testing.T) {
-	t.Parallel()
-	root := makeTree(t, map[string]string{
-		"AGENTS.src.md": "@a.md\n",
-		"a.md":          "A-CONTENT\n",
-	})
-	opts := optsFor(root)
-	opts.MarkerDesc = "custom marker text"
-	content, inlined, err := Flatten(opts)
-	if err != nil {
-		t.Fatalf("Flatten: %v", err)
-	}
-	if inlined != 1 {
-		t.Errorf("inlined = %d, want 1", inlined)
-	}
-	want := "Contents of a.md (custom marker text):\n\nA-CONTENT\n\n"
-	if content != want {
-		t.Errorf("content = %q, want %q", content, want)
-	}
-	if strings.Contains(content, DefaultMarkerDesc) {
-		t.Errorf("content should not contain the default marker desc\ngot:\n%s", content)
 	}
 }
