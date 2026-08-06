@@ -32,6 +32,13 @@ type Options struct {
 	// opts.SrcPath. Every recursive @path import still reads from disk via
 	// os.ReadFile exactly as always — only the initial call reads from here.
 	Stdin io.Reader
+
+	// OutIsStdout signals that the caller intends to write the result to
+	// stdout rather than a file. flatten itself never writes output (that's
+	// the CLI layer's job via Assemble + a Writer) — this field exists purely
+	// so cli.go can decide banner/success-message behavior from a single
+	// flatten.Options value alongside Stdin, without a second parallel struct.
+	OutIsStdout bool
 }
 
 func (o Options) markerDesc() string {

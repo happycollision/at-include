@@ -63,6 +63,7 @@ type options struct {
 	listImports   bool
 	src           string
 	out           string
+	outSet        bool
 	root          string
 	rootSet       bool
 	markerDesc    string
@@ -123,37 +124,85 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 	}
 }
 
+// stdinPlaceholder is replaced by the real stdin reader once Run threads one
+// through (a later task). It exists only so this step's tests can assert
+// fOpts.Stdin != nil without Run's signature having changed yet.
+type stdinPlaceholder struct{}
+
+func (stdinPlaceholder) Read(p []byte) (int, error) { return 0, io.EOF }
+
 // resolveOptions turns CLI strings into absolute paths and display names.
+//
+// "--src -" and "--out -" are sentinels for stdin/stdout rather than literal
+// filenames named "-": when present, filepath.Abs and the same-path collision
+// check are skipped for that side entirely, since "-" never refers to a real
+// file on disk and comparing it against the other side would be meaningless.
 func resolveOptions(o options) (flatten.Options, error) {
-	src, err := filepath.Abs(o.src)
-	if err != nil {
-		return flatten.Options{}, err
+	srcIsStdin := o.src == "-"
+	outIsStdout := o.out == "-" || (srcIsStdin && !o.outSet)
+
+	var src string
+	if !srcIsStdin {
+		var err error
+		src, err = filepath.Abs(o.src)
+		if err != nil {
+			return flatten.Options{}, err
+		}
 	}
-	out, err := filepath.Abs(o.out)
-	if err != nil {
-		return flatten.Options{}, err
+
+	var out string
+	if !outIsStdout {
+		var err error
+		out, err = filepath.Abs(o.out)
+		if err != nil {
+			return flatten.Options{}, err
+		}
 	}
-	if samePath(src, out) {
+
+	if !srcIsStdin && !outIsStdout && samePath(src, out) {
 		return flatten.Options{}, &usageError{fmt.Errorf(
 			"--out must not be the same file as --src (both resolve to %s); "+
 				"this would overwrite the hand-authored source", filepath.Clean(src))}
 	}
-	root := filepath.Dir(src)
-	if o.rootSet {
-		if root, err = filepath.Abs(o.root); err != nil {
+
+	root := ""
+	switch {
+	case o.rootSet:
+		var err error
+		root, err = filepath.Abs(o.root)
+		if err != nil {
 			return flatten.Options{}, err
 		}
+	case srcIsStdin:
+		var err error
+		root, err = os.Getwd()
+		if err != nil {
+			return flatten.Options{}, err
+		}
+	default:
+		root = filepath.Dir(src)
 	}
-	return flatten.Options{
+
+	fOpts := flatten.Options{
 		SrcPath:     src,
 		OutPath:     out,
 		RootDir:     root,
 		MaxDepth:    o.maxDepth,
 		MaxDepthSet: o.maxDepthSet,
 		MarkerDesc:  o.markerDesc,
-		SrcName:     displayName(root, src, o.src),
-		OutName:     displayName(root, out, o.out),
-	}, nil
+		OutIsStdout: outIsStdout,
+	}
+	if srcIsStdin {
+		fOpts.Stdin = stdinPlaceholder{} // replaced with real stdin in a later task
+		fOpts.SrcPath = filepath.Join(root, "-")
+		fOpts.SrcName = "-"
+	} else {
+		fOpts.SrcName = displayName(root, src, o.src)
+	}
+	if !outIsStdout {
+		fOpts.OutName = displayName(root, out, o.out)
+	}
+	return fOpts, nil
 }
 
 // samePath reports whether two absolute paths name the same file on disk.
@@ -364,7 +413,7 @@ func parseArgs(argv []string) (options, error) {
 			if err != nil {
 				return o, err
 			}
-			o.out = v
+			o.out, o.outSet = v, true
 		case "--root":
 			v, err := value(argv, &i, a)
 			if err != nil {

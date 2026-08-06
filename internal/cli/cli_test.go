@@ -560,6 +560,103 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
+func TestResolveOptionsSrcDashSetsStdinModeAndCwdRoot(t *testing.T) {
+	dir := writeTree(t, map[string]string{"unrelated.md": "x\n"})
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(prev) }()
+
+	o, err := parseArgs([]string{"--src", "-"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	fOpts, err := resolveOptions(o)
+	if err != nil {
+		t.Fatalf("resolveOptions: %v", err)
+	}
+	if fOpts.Stdin == nil {
+		t.Error("Stdin should be set (non-nil) when --src is -")
+	}
+	if fOpts.RootDir != dir {
+		t.Errorf("RootDir = %q, want %q (CWD default when --src is -)", fOpts.RootDir, dir)
+	}
+}
+
+func TestResolveOptionsOutDashMeansStdout(t *testing.T) {
+	dir := writeTree(t, map[string]string{"AGENTS.src.md": "x\n"})
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(prev) }()
+
+	o, err := parseArgs([]string{"--out", "-"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	fOpts, err := resolveOptions(o)
+	if err != nil {
+		t.Fatalf("resolveOptions: %v", err)
+	}
+	if !fOpts.OutIsStdout {
+		t.Error("OutIsStdout should be true when --out is -")
+	}
+}
+
+func TestResolveOptionsSrcDashDefaultsOutToStdout(t *testing.T) {
+	dir := writeTree(t, map[string]string{"unrelated.md": "x\n"})
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(prev) }()
+
+	o, err := parseArgs([]string{"--src", "-"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	fOpts, err := resolveOptions(o)
+	if err != nil {
+		t.Fatalf("resolveOptions: %v", err)
+	}
+	if !fOpts.OutIsStdout {
+		t.Error("OutIsStdout should default to true when --src is - and --out wasn't explicitly given")
+	}
+}
+
+func TestResolveOptionsSrcDashSkipsCollisionCheck(t *testing.T) {
+	dir := writeTree(t, map[string]string{"unrelated.md": "x\n"})
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(prev) }()
+
+	// "-" as both --src and --out must never trigger the same-path usage
+	// error: they're independent streams, not the same file.
+	o, err := parseArgs([]string{"--src", "-", "--out", "-"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if _, err := resolveOptions(o); err != nil {
+		t.Errorf("resolveOptions(--src - --out -): unexpected error %v", err)
+	}
+}
+
 // TestShellQuoteRoundTripsThroughShell is the load-bearing assertion behind
 // Fix 4: actually run the quoted output through /bin/sh and confirm the value
 // comes back out byte-for-byte, for values containing every metacharacter the
