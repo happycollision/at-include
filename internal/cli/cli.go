@@ -119,7 +119,7 @@ func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	if opts.hookMode {
+	if opts.hookMode && !opts.listImports {
 		if !opts.srcSet {
 			opts.src = "AGENTS.md"
 		}
@@ -303,6 +303,8 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 	}
 	var assembled string
 	switch {
+	// HookMode must be checked before Stdin != nil: --hook-mode --src - should
+	// still get the hook preamble, not the no-banner stdin-piping treatment.
 	case fOpts.HookMode:
 		assembled = flatten.Assemble(flatten.HookPreamble(), content)
 	case fOpts.Stdin != nil:

@@ -21,6 +21,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -853,8 +855,54 @@ func TestRunHookModeDefaultsSrcToAgentsAndOutToStdout(t *testing.T) {
 	if !strings.Contains(stdout, "pre-expanded") {
 		t.Errorf("stdout should contain the hook preamble, got %q", stdout)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md.generated")); err == nil {
-		t.Error("hook mode must not write any output file")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	if want := []string{"AGENTS.md", "x.md"}; !slices.Equal(names, want) {
+		t.Errorf("hook mode must not write any new file, dir contains %v, want %v", names, want)
+	}
+	agentsContent, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(agentsContent) != "Body\n\n@x.md\n" {
+		t.Errorf("AGENTS.md should be unmodified by hook mode, got %q", agentsContent)
+	}
+}
+
+func TestRunHookModeDoesNotAffectListImports(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"AGENTS.src.md": "@y.md\n",
+		"y.md":          "Y\n",
+		"AGENTS.md":     "@x.md\n",
+		"x.md":          "X\n",
+	})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--list-imports"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if stdout != "y.md\n" {
+		t.Errorf("stdout = %q, want %q (hook-mode should not change --list-imports's default --src)", stdout, "y.md\n")
+	}
+}
+
+func TestRunHookModeWithStdinSourceStillGetsPreamble(t *testing.T) {
+	dir := writeTree(t, map[string]string{"x.md": "X-STDIN\n"})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--src", "-"}, "Body\n\n@x.md\n")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "pre-expanded") {
+		t.Errorf("stdout should contain the hook preamble even with stdin source, got %q", stdout)
+	}
+	if !strings.Contains(stdout, "X-STDIN") {
+		t.Errorf("stdout should contain expanded stdin content, got %q", stdout)
 	}
 }
 
