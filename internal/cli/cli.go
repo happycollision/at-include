@@ -296,6 +296,12 @@ func isParentTraversal(rel string) bool {
 }
 
 func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
+	if fOpts.HookMode && fOpts.Stdin == nil {
+		if _, err := os.Stat(fOpts.SrcPath); errors.Is(err, os.ErrNotExist) {
+			return 0
+		}
+	}
+
 	content, inlined, err := flatten.Flatten(fOpts)
 	if err != nil {
 		fprintf(stderr, "at-include: %s\n", err)

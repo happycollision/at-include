@@ -954,3 +954,42 @@ func TestRunHookModeCheckIsRejected(t *testing.T) {
 		t.Errorf("stderr should mention both flags and usage, got %q", stderr)
 	}
 }
+
+func TestRunHookModeMissingDefaultSourceIsSilent(t *testing.T) {
+	dir := writeTree(t, map[string]string{}) // no AGENTS.md at all
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode"}, "")
+	if code != 0 {
+		t.Errorf("code = %d, want 0", code)
+	}
+	if stdout != "" {
+		t.Errorf("stdout should be empty, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("stderr should be empty, got %q", stderr)
+	}
+}
+
+func TestRunHookModeMissingExplicitSourceIsAlsoSilent(t *testing.T) {
+	dir := writeTree(t, map[string]string{}) // custom.md does not exist either
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--src", "custom.md"}, "")
+	if code != 0 {
+		t.Errorf("code = %d, want 0", code)
+	}
+	if stdout != "" {
+		t.Errorf("stdout should be empty, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("stderr should be empty, got %q", stderr)
+	}
+}
+
+func TestRunHookModeSourceExistsButNoImportsStillPrintsPreamble(t *testing.T) {
+	dir := writeTree(t, map[string]string{"AGENTS.md": "Just plain body text, no imports.\n"})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "pre-expanded") {
+		t.Errorf("preamble should still print even with zero imports, got %q", stdout)
+	}
+}
