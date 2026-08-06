@@ -199,7 +199,9 @@ func resolveOptions(o options) (flatten.Options, error) {
 	} else {
 		fOpts.SrcName = displayName(root, src, o.src)
 	}
-	if !outIsStdout {
+	if outIsStdout {
+		fOpts.OutName = "-"
+	} else {
 		fOpts.OutName = displayName(root, out, o.out)
 	}
 	return fOpts, nil

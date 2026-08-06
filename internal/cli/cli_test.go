@@ -611,6 +611,30 @@ func TestResolveOptionsOutDashMeansStdout(t *testing.T) {
 	}
 }
 
+func TestResolveOptionsOutDashSetsOutNameToDash(t *testing.T) {
+	dir := writeTree(t, map[string]string{"AGENTS.src.md": "x\n"})
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(prev) }()
+
+	o, err := parseArgs([]string{"--out", "-"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	fOpts, err := resolveOptions(o)
+	if err != nil {
+		t.Fatalf("resolveOptions: %v", err)
+	}
+	if fOpts.OutName != "-" {
+		t.Errorf("OutName = %q, want %q", fOpts.OutName, "-")
+	}
+}
+
 func TestResolveOptionsSrcDashDefaultsOutToStdout(t *testing.T) {
 	dir := writeTree(t, map[string]string{"unrelated.md": "x\n"})
 	prev, err := os.Getwd()
