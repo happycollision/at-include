@@ -596,10 +596,25 @@ func TestFlattenAbsolutePathToken(t *testing.T) {
 	absTarget := filepath.Join(root, "outside", "z.md")
 	srcDir := makeTree(t, map[string]string{}) // separate importer directory
 	srcPath := filepath.Join(srcDir, "AGENTS.src.md")
+	// The token is written with forward slashes rather than the native
+	// separator. On Windows the native form is backslash-separated
+	// ("C:\Users\...\z.md"), and a backslash that isn't part of a "\ " escape
+	// terminates a token by design (see the scanner in scan.go and the spec in
+	// docs/architecture.md) — so "@C:\Users\...\z.md" yields the candidate
+	// "C:", resolves to nothing, and this test would fail on Windows only.
+	//
+	// Forward slashes are the portable spelling: filepath.IsAbs accepts the
+	// "C:/Users/..." drive form on Windows, so the absolute branch in
+	// tryExpandToken is still the one under test here, on every platform.
+	//
+	// Whether "@C:\path\file.md" *should* expand on Windows is a real open
+	// question, tracked separately; it is a feature decision about the token
+	// grammar, not something this test asserts.
+	absToken := filepath.ToSlash(absTarget)
 	// "X " (with the space) keeps a preceding literal in play to prove it is
 	// not eaten, while leaving the '@' at a valid token boundary — "X@" would
 	// make the '@' mid-word and expand nothing (see atTokenBoundary).
-	if err := os.WriteFile(srcPath, []byte("X @"+absTarget+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(srcPath, []byte("X @"+absToken+"\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	opts := optsFor(srcDir)
