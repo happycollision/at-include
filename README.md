@@ -20,13 +20,58 @@ Supported platforms: Linux (amd64, arm64), macOS (amd64, arm64), Windows (amd64)
 
 ## What it does
 
-`at-include` reads a source file (default `AGENTS.src.md`), finds every
-`@<path>` token that resolves to a real file relative to the file it appears
-in, and replaces the token with that file's contents — recursively, so an
-included file's own `@` imports are expanded too. The result is written to an
-output file (default `AGENTS.md`) behind a generated-file banner. This lets
-you author instructions across several small, reusable files and check in one
-flattened, human- and agent-readable document.
+`at-include` finds every `@<path>` token in a Markdown file that resolves to
+a real file relative to where the token appears, and replaces the token with
+that file's contents — recursively, so an included file's own `@` imports are
+expanded too. This lets you author agent instructions across several small,
+reusable files instead of one large one, without giving up a single flattened
+document for tools to actually read.
+
+Splitting instructions across files is worth doing, but the naive way to do
+it — write "see `docs/security.md`" in your instructions and hope the agent
+goes and reads it — is only ever a suggestion. The agent decides for itself
+whether following that pointer is worth the effort, and it can simply
+decide not to, especially under time or context pressure; there's no
+guarantee content you consider load-bearing ever actually reaches it. Even
+when it does decide to read the file, that's a tool call it has to make,
+wait on, and pay context for, on top of whatever it was already doing.
+`@`-imports remove the judgment call for whatever you've chosen to always
+inline: that content is already in the first thing the agent reads, every
+session, no round-trip and no decision required — while leaving the agent
+free to go fetch anything else on its own.
+
+Claude Code already solves this for its own `CLAUDE.md` — it expands
+`@`-imports natively. Nothing else does: [Codex](https://developers.openai.com/codex)'s
+`AGENTS.md` has no way to reference another file at all, and neither does
+anything else that reads a plain `AGENTS.md`/`CLAUDE.md` (whatever adopts the
+[AGENTS.md](https://agents.md) convention). `at-include` brings Claude Code's
+capability to those tools too. Two overlapping reasons to want this:
+
+- **You use Codex** (or any tool without native `@`-imports) — there's no
+  Codex-native way to get that composability, so `at-include` fills the gap.
+- **You use both Claude Code and other tools** — without `at-include`, you'd
+  either maintain duplicate, drifting instruction files per tool, or give up
+  composability everywhere just to keep them in sync.
+
+`at-include` itself doesn't care which tool ends up reading its output — it
+just does the text transform.
+
+## Two ways to use this
+
+There are two strategies for getting `@`-expanded content in front of an
+agent. One trades more tracked files for a guarantee of exactly what gets
+loaded; the other trades that guarantee for fewer files and less setup.
+
+### Build-time flattening
+
+`at-include` runs as a build step — locally, in CI, or from a git hook — and
+writes a real, fully-expanded `AGENTS.md` to disk, which you check into the
+repo alongside `AGENTS.src.md`. Every agent tool that reads `AGENTS.md`
+(Claude Code, Codex, anything else that walks the directory tree looking for
+one) sees the exact same fully-expanded text, with zero extra setup on their
+end — they never even need to know `@`-imports or `at-include` exist. Most of
+the rest of this README ([Usage](#usage) through
+[Add it to a git hook](#add-it-to-a-git-hook)) covers this strategy.
 
 Given `AGENTS.src.md`:
 
@@ -67,6 +112,47 @@ Contents of notes.md (project instructions, checked into the codebase):
 - Use tabs, not spaces.
 - Write tests first.
 ```
+
+The cost is explicitness: you're tracking two files instead of one
+(`AGENTS.src.md` and the generated `AGENTS.md`), edits always go to the
+source, and regeneration (`at-include`, or `--check` in CI) is a step you have
+to remember or automate — see [Use it as CI tooling](#use-it-as-ci-tooling)
+and [Add it to a git hook](#add-it-to-a-git-hook). In exchange, you get full
+control and a hard guarantee: what's checked into `AGENTS.md` is exactly, byte
+for byte, what every agent will load, everywhere, with no surprises.
+
+You can also choose not to check the generated `AGENTS.md` into the repo at
+all, regenerating it locally or in CI whenever it's needed. That drops the
+"two files in the diff" overhead, but gives up the guarantee along with it:
+drift between `AGENTS.src.md` and a hand-edited `AGENTS.md` no longer shows
+up in a diff for anyone to catch, since the generated file was never
+committed in the first place — and a fresh worktree or clone has no
+`AGENTS.md` at all until something actually runs `at-include` in it.
+
+### Load-time expansion (`--hook-mode`)
+
+Some teams don't want the two-file split `AGENTS.src.md`/`AGENTS.md` implies.
+`AGENTS.md` (or a gitignored local override) keeps its real, unexpanded
+`@path` tokens, and a lifecycle hook that runs `at-include --hook-mode` at
+session start injects the expansion as additional context instead. See
+[Use it in an agent lifecycle hook](#use-it-in-an-agent-lifecycle-hook) for
+how to wire this up.
+
+This is fewer files and no separate regeneration step, but comes with real
+limits worth knowing before you commit to it:
+
+- It only works where you can install the hook. Without it, `AGENTS.md`'s
+  `@path` tokens are just literal, unexpanded text — there's no fallback.
+- Tools like Codex and Claude Code automatically discover and load an
+  `AGENTS.md` (or `CLAUDE.md`) in *every* directory as they walk the
+  repository, not just the one at the root. `at-include --hook-mode` has no
+  way to hook into that per-directory traversal — it only expands the one
+  file you point `--src` at. Any other `AGENTS.md` elsewhere in the tree still
+  won't have its `@`-imports resolved for a tool relying on hook-time
+  expansion.
+
+If either limitation is a problem for your repo, use build-time flattening
+instead.
 
 ## The `@path` rules
 
@@ -311,13 +397,13 @@ up a hook.
 
 ## Use it in an agent lifecycle hook
 
-`--hook-mode` is for a different situation than the rest of this README: a
-hand-authored file — say `AGENTS.md` itself, or a gitignored local override
-like `AGENTS.override.md` — that contains real `@path` imports but is read
-**as-is**, tokens unexpanded, by a tool with no native `@`-import support.
-Pair it with a lifecycle hook that runs `at-include --hook-mode` at agent
-startup to inject the expanded imports as additional context, without ever
-writing a checked-in, flattened file for that content.
+This is how you wire up [load-time expansion](#load-time-expansion---hook-mode):
+`AGENTS.md` itself (or a gitignored local override like
+`AGENTS.override.md`) contains real `@path` imports but is read **as-is**,
+tokens unexpanded, by a tool with no native `@`-import support. A lifecycle
+hook runs `at-include --hook-mode` at agent startup and injects the expanded
+imports as additional context, without ever writing a checked-in, flattened
+file for that content.
 
 For example, wiring it into a Codex `SessionStart` hook (`.codex/config.toml`
 or `hooks.json`):
