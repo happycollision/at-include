@@ -298,6 +298,20 @@ func isParentTraversal(rel string) bool {
 func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 	if fOpts.HookMode && fOpts.Stdin == nil {
 		if _, err := os.Stat(fOpts.SrcPath); errors.Is(err, os.ErrNotExist) {
+			if !fOpts.OutIsStdout {
+				// A previous run may have written real content to this file; leaving
+				// it untouched would let a hook keep reading stale, silently-outdated
+				// context forever. Truncate to empty so the "missing source means
+				// nothing to contribute" contract holds the same way whether --out
+				// is stdout or a file.
+				//
+				// #nosec G306 -- 0o644 is the intended permission for this file; same
+				// justification as the normal write path below (same file).
+				if err := os.WriteFile(fOpts.OutPath, []byte{}, 0o644); err != nil {
+					fprintf(stderr, "at-include: %s\n", err)
+					return 1
+				}
+			}
 			return 0
 		}
 	}

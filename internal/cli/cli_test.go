@@ -993,3 +993,46 @@ func TestRunHookModeSourceExistsButNoImportsStillPrintsPreamble(t *testing.T) {
 		t.Errorf("preamble should still print even with zero imports, got %q", stdout)
 	}
 }
+
+func TestRunHookModeMissingSourceTruncatesExplicitOutFile(t *testing.T) {
+	dir := writeTree(t, map[string]string{})
+	outPath := filepath.Join(dir, "ctx.md")
+	if err := os.WriteFile(outPath, []byte("STALE PREVIOUS CONTENT\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--out", "ctx.md"}, "")
+	if code != 0 {
+		t.Errorf("code = %d, want 0", code)
+	}
+	if stdout != "" {
+		t.Errorf("stdout should be empty, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("stderr should be empty, got %q", stderr)
+	}
+	written, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(written) != 0 {
+		t.Errorf("ctx.md should be truncated to empty, got %q", written)
+	}
+}
+
+func TestRunHookModeMissingSourceWithStdoutOutDoesNotTouchDisk(t *testing.T) {
+	dir := writeTree(t, map[string]string{})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode"}, "")
+	if code != 0 {
+		t.Errorf("code = %d, want 0", code)
+	}
+	if stdout != "" || stderr != "" {
+		t.Errorf("expected silent, got stdout=%q stderr=%q", stdout, stderr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("no files should be written when --out defaults to stdout, dir has: %v", entries)
+	}
+}

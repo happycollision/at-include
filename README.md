@@ -309,6 +309,37 @@ A git hook is a convenience, not a guarantee — anyone can bypass one with
 [Use it as CI tooling](#use-it-as-ci-tooling) above) even if you've also wired
 up a hook.
 
+## Use it in an agent lifecycle hook
+
+`--hook-mode` is for a different situation than the rest of this README: a
+hand-authored file — say `AGENTS.md` itself, or a gitignored local override
+like `AGENTS.override.md` — that contains real `@path` imports but is read
+**as-is**, tokens unexpanded, by a tool with no native `@`-import support.
+Pair it with a lifecycle hook that runs `at-include --hook-mode` at agent
+startup to inject the expanded imports as additional context, without ever
+writing a checked-in, flattened file for that content.
+
+For example, wiring it into a Codex `SessionStart` hook (`.codex/config.toml`
+or `hooks.json`):
+
+```toml
+[hooks]
+SessionStart = [
+  { command = "at-include --hook-mode" }
+]
+```
+
+> [!NOTE]
+> In hook mode, a missing source file — whether `--src` was left at its
+> default or passed explicitly — produces empty output and exit `0`,
+> silently. There's no safe channel to report an error into a hook payload
+> that becomes model context, so this is deliberate, not a bug: a misconfigured
+> `--src` path fails silently rather than loudly. If context you expect isn't
+> showing up, check the path by hand.
+
+`--src` defaults to `AGENTS.md` (not `AGENTS.src.md`) and `--out` defaults to
+stdout in this mode — both are still overridable with `--src`/`--out` as usual.
+
 ## Development
 
 ```sh
