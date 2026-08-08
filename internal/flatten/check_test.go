@@ -86,6 +86,32 @@ func tail(s string) string {
 	return s
 }
 
+func TestGenerateHookModeUsesPreambleNotBanner(t *testing.T) {
+	t.Parallel()
+	root := makeTree(t, map[string]string{
+		"AGENTS.md": "Body line\n\n@x.md\n",
+		"x.md":      "X-CONTENT\n",
+	})
+	opts := optsFor(root)
+	opts.SrcPath = filepath.Join(root, "AGENTS.md")
+	opts.HookMode = true
+	out, err := Generate(opts)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if strings.Contains(out, "This file is generated") {
+		t.Errorf("hook-mode output should not contain the normal banner\ngot:\n%s", out)
+	}
+	if !strings.Contains(out, "pre-expanded") {
+		t.Errorf("hook-mode output should contain the hook preamble\ngot:\n%s", out)
+	}
+	for _, want := range []string{"Body line", "X-CONTENT"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
+
 func TestCheckUpToDate(t *testing.T) {
 	t.Parallel()
 	root := makeTree(t, map[string]string{"AGENTS.src.md": "Body\n\n@x.md\n", "x.md": "X\n"})

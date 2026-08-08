@@ -21,6 +21,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -223,6 +225,37 @@ func TestParseArgsMaxDepthGrammar(t *testing.T) {
 		if _, err := parseArgs([]string{"--max-depth", raw}); err == nil {
 			t.Errorf("parseArgs(--max-depth %q): want error, got nil", raw)
 		}
+	}
+}
+
+func TestParseArgsHookModeFlag(t *testing.T) {
+	o, err := parseArgs([]string{"--hook-mode"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if !o.hookMode {
+		t.Error("want hookMode = true")
+	}
+}
+
+func TestParseArgsSrcSetTracksExplicitFlag(t *testing.T) {
+	o, err := parseArgs([]string{})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if o.srcSet {
+		t.Error("want srcSet = false when --src is not passed")
+	}
+
+	o, err = parseArgs([]string{"--src", "custom.md"})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
+	if !o.srcSet {
+		t.Error("want srcSet = true when --src is passed")
+	}
+	if o.src != "custom.md" {
+		t.Errorf("src = %q, want %q", o.src, "custom.md")
 	}
 }
 
@@ -804,5 +837,202 @@ func TestRunListImportsSrcDash(t *testing.T) {
 	}
 	if got, want := stdout, "a.md\nc.md\n"; got != want {
 		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunHookModeDefaultsSrcToAgentsAndOutToStdout(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"AGENTS.md": "Body\n\n@x.md\n",
+		"x.md":      "X-HOOK\n",
+	})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "X-HOOK") {
+		t.Errorf("stdout should contain expanded content, got %q", stdout)
+	}
+	if !strings.Contains(stdout, "pre-expanded") {
+		t.Errorf("stdout should contain the hook preamble, got %q", stdout)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	if want := []string{"AGENTS.md", "x.md"}; !slices.Equal(names, want) {
+		t.Errorf("hook mode must not write any new file, dir contains %v, want %v", names, want)
+	}
+	agentsContent, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(agentsContent) != "Body\n\n@x.md\n" {
+		t.Errorf("AGENTS.md should be unmodified by hook mode, got %q", agentsContent)
+	}
+}
+
+func TestRunHookModeDoesNotAffectListImports(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"AGENTS.src.md": "@y.md\n",
+		"y.md":          "Y\n",
+		"AGENTS.md":     "@x.md\n",
+		"x.md":          "X\n",
+	})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--list-imports"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if stdout != "y.md\n" {
+		t.Errorf("stdout = %q, want %q (hook-mode should not change --list-imports's default --src)", stdout, "y.md\n")
+	}
+}
+
+func TestRunHookModeWithStdinSourceStillGetsPreamble(t *testing.T) {
+	dir := writeTree(t, map[string]string{"x.md": "X-STDIN\n"})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--src", "-"}, "Body\n\n@x.md\n")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "pre-expanded") {
+		t.Errorf("stdout should contain the hook preamble even with stdin source, got %q", stdout)
+	}
+	if !strings.Contains(stdout, "X-STDIN") {
+		t.Errorf("stdout should contain expanded stdin content, got %q", stdout)
+	}
+}
+
+func TestRunHookModeExplicitOutStillWritesFile(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"AGENTS.md": "Body\n\n@x.md\n",
+		"x.md":      "X-HOOK\n",
+	})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--out", "hook-context.md"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("explicit file --out should not also print to stdout, got %q", stdout)
+	}
+	written, err := os.ReadFile(filepath.Join(dir, "hook-context.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(written), "X-HOOK") || !strings.Contains(string(written), "pre-expanded") {
+		t.Errorf("written file looks wrong:\n%s", written)
+	}
+}
+
+func TestRunHookModeExplicitSrcOverridesDefault(t *testing.T) {
+	dir := writeTree(t, map[string]string{
+		"custom.md": "Body\n\n@x.md\n",
+		"x.md":      "X-CUSTOM\n",
+	})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--src", "custom.md"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "X-CUSTOM") {
+		t.Errorf("stdout should contain custom.md's expansion, got %q", stdout)
+	}
+}
+
+func TestRunHookModeCheckIsRejected(t *testing.T) {
+	dir := writeTree(t, map[string]string{"AGENTS.md": "Body\n"})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--check"}, "")
+	if code != 2 {
+		t.Errorf("code = %d, want 2 (usage error)", code)
+	}
+	if stdout != "" {
+		t.Errorf("stdout should be empty on this usage error, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "--hook-mode") || !strings.Contains(stderr, "--check") || !strings.Contains(stderr, "Usage") {
+		t.Errorf("stderr should mention both flags and usage, got %q", stderr)
+	}
+}
+
+func TestRunHookModeMissingDefaultSourceIsSilent(t *testing.T) {
+	dir := writeTree(t, map[string]string{}) // no AGENTS.md at all
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode"}, "")
+	if code != 0 {
+		t.Errorf("code = %d, want 0", code)
+	}
+	if stdout != "" {
+		t.Errorf("stdout should be empty, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("stderr should be empty, got %q", stderr)
+	}
+}
+
+func TestRunHookModeMissingExplicitSourceIsAlsoSilent(t *testing.T) {
+	dir := writeTree(t, map[string]string{}) // custom.md does not exist either
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--src", "custom.md"}, "")
+	if code != 0 {
+		t.Errorf("code = %d, want 0", code)
+	}
+	if stdout != "" {
+		t.Errorf("stdout should be empty, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("stderr should be empty, got %q", stderr)
+	}
+}
+
+func TestRunHookModeSourceExistsButNoImportsStillPrintsPreamble(t *testing.T) {
+	dir := writeTree(t, map[string]string{"AGENTS.md": "Just plain body text, no imports.\n"})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode"}, "")
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "pre-expanded") {
+		t.Errorf("preamble should still print even with zero imports, got %q", stdout)
+	}
+}
+
+func TestRunHookModeMissingSourceTruncatesExplicitOutFile(t *testing.T) {
+	dir := writeTree(t, map[string]string{})
+	outPath := filepath.Join(dir, "ctx.md")
+	if err := os.WriteFile(outPath, []byte("STALE PREVIOUS CONTENT\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode", "--out", "ctx.md"}, "")
+	if code != 0 {
+		t.Errorf("code = %d, want 0", code)
+	}
+	if stdout != "" {
+		t.Errorf("stdout should be empty, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("stderr should be empty, got %q", stderr)
+	}
+	written, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(written) != 0 {
+		t.Errorf("ctx.md should be truncated to empty, got %q", written)
+	}
+}
+
+func TestRunHookModeMissingSourceWithStdoutOutDoesNotTouchDisk(t *testing.T) {
+	dir := writeTree(t, map[string]string{})
+	code, stdout, stderr := run(t, dir, []string{"--hook-mode"}, "")
+	if code != 0 {
+		t.Errorf("code = %d, want 0", code)
+	}
+	if stdout != "" || stderr != "" {
+		t.Errorf("expected silent, got stdout=%q stderr=%q", stdout, stderr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("no files should be written when --out defaults to stdout, dir has: %v", entries)
 	}
 }

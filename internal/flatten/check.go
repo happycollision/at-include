@@ -16,11 +16,16 @@ type CheckResult struct {
 }
 
 // Generate returns the full output text: banner, a blank line, then the
-// flattened source, ending in exactly one newline.
+// flattened source, ending in exactly one newline. When opts.HookMode is set,
+// HookPreamble() is used in place of Banner(opts) — see HookPreamble's doc
+// comment for why the two are not configured the same way.
 func Generate(opts Options) (string, error) {
 	content, _, err := Flatten(opts)
 	if err != nil {
 		return "", err
+	}
+	if opts.HookMode {
+		return Assemble(HookPreamble(), content), nil
 	}
 	return Assemble(Banner(opts), content), nil
 }

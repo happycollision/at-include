@@ -44,6 +44,10 @@ but an independent implementation — not guaranteed to match it exactly.
 Options:
   (no args)           Generate and write the output file
   --check             Verify the output file is up to date; exit nonzero if not
+  --hook-mode         Prepend a fixed @import-explainer preamble instead of the
+                      generated-file banner; --src defaults to AGENTS.md and
+                      --out defaults to stdout. For piping into an agent
+                      lifecycle hook, not for writing a checked-in file.
   --src <path>        Source file (default: AGENTS.src.md); "-" reads from stdin
   --out <path>        Output file (default: AGENTS.md); "-" writes to stdout
   --root <path>       Root for marker paths (default: the source file's directory,
@@ -70,7 +74,9 @@ type options struct {
 	help          bool
 	version       bool
 	listImports   bool
+	hookMode      bool
 	src           string
+	srcSet        bool
 	out           string
 	outSet        bool
 	root          string
@@ -113,6 +119,21 @@ func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	if opts.hookMode && !opts.listImports {
+		if !opts.srcSet {
+			opts.src = "AGENTS.md"
+		}
+		if !opts.outSet {
+			opts.out = "-"
+		}
+	}
+
+	if opts.check && opts.hookMode {
+		fprintf(stderr, "at-include: --check cannot be combined with --hook-mode "+
+			"(--check compares against an on-disk generated file; hook mode has no such file)\n\n%s", usage)
+		return 2
+	}
+
 	fOpts, err := resolveOptions(opts)
 	if err != nil {
 		var uerr *usageError
@@ -132,6 +153,8 @@ func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			"(stdin content is transient and can't be compared against on a later run)\n\n%s", usage)
 		return 2
 	}
+
+	fOpts.HookMode = opts.hookMode
 
 	switch {
 	case opts.listImports:
@@ -273,15 +296,40 @@ func isParentTraversal(rel string) bool {
 }
 
 func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
+	if fOpts.HookMode && fOpts.Stdin == nil {
+		if _, err := os.Stat(fOpts.SrcPath); errors.Is(err, os.ErrNotExist) {
+			if !fOpts.OutIsStdout {
+				// A previous run may have written real content to this file; leaving
+				// it untouched would let a hook keep reading stale, silently-outdated
+				// context forever. Truncate to empty so the "missing source means
+				// nothing to contribute" contract holds the same way whether --out
+				// is stdout or a file.
+				//
+				// #nosec G306 -- 0o644 is the intended permission for this file; same
+				// justification as the normal write path below (same file).
+				if err := os.WriteFile(fOpts.OutPath, []byte{}, 0o644); err != nil {
+					fprintf(stderr, "at-include: %s\n", err)
+					return 1
+				}
+			}
+			return 0
+		}
+	}
+
 	content, inlined, err := flatten.Flatten(fOpts)
 	if err != nil {
 		fprintf(stderr, "at-include: %s\n", err)
 		return 1
 	}
 	var assembled string
-	if fOpts.Stdin != nil {
+	switch {
+	// HookMode must be checked before Stdin != nil: --hook-mode --src - should
+	// still get the hook preamble, not the no-banner stdin-piping treatment.
+	case fOpts.HookMode:
+		assembled = flatten.Assemble(flatten.HookPreamble(), content)
+	case fOpts.Stdin != nil:
 		assembled = assembleNoBanner(content)
-	} else {
+	default:
 		assembled = flatten.Assemble(flatten.Banner(fOpts), content)
 	}
 
@@ -297,8 +345,10 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 		fprintf(stderr, "at-include: %s\n", err)
 		return 1
 	}
-	fprintf(stdout, "Generated %s from %s (%d files inlined).\n",
-		fOpts.OutName, fOpts.SrcName, inlined)
+	if !fOpts.HookMode {
+		fprintf(stdout, "Generated %s from %s (%d files inlined).\n",
+			fOpts.OutName, fOpts.SrcName, inlined)
+	}
 	return 0
 }
 
@@ -441,6 +491,8 @@ func parseArgs(argv []string) (options, error) {
 		switch a := argv[i]; a {
 		case "--check":
 			o.check = true
+		case "--hook-mode":
+			o.hookMode = true
 		case "--help", "-h":
 			o.help = true
 		case "--version":
@@ -452,7 +504,7 @@ func parseArgs(argv []string) (options, error) {
 			if err != nil {
 				return o, err
 			}
-			o.src = v
+			o.src, o.srcSet = v, true
 		case "--out":
 			v, err := value(argv, &i, a)
 			if err != nil {
