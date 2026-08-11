@@ -317,3 +317,55 @@ The black-box CLI test suite lives under [`test/`](test/README.md); the case
 directories in [`test/cases/`](test/cases) are plain data (a `cmd` file, an
 input `files/` tree, and `expect/*` files) — adding a test case means adding a
 directory, not writing Go.
+
+## Releasing
+
+This repo tracks its changelog with [Changie](https://changie.dev): every
+change lands with its own fragment file, and those fragments are batched into
+`CHANGELOG.md` at release time.
+
+To add a changelog entry for your own change: `mise exec -- changie new`. If a
+change genuinely needs no changelog entry, use
+`mise exec -- changie new --kind None` rather than skipping the fragment
+entirely — a push to `master` that adds commits without a new fragment under
+`.changes/unreleased/` is rejected, both locally (a lefthook pre-push hook)
+and in CI (an after-the-fact backstop on pushes to `master`), so an explicit
+`None` fragment is how you satisfy that check for a change that doesn't
+warrant a changelog line. (Release commits are the one exception: they
+consume fragments rather than adding one, and the check accepts their
+`CHANGELOG.md` change instead — which is why step 4 below passes.)
+
+To cut a release:
+
+1. Make sure every merged change since the last release has a changelog
+   fragment under `.changes/unreleased/` (this is enforced on push to
+   `master`, so in practice it's already true).
+2. Run `mise run changelog` to batch the unreleased fragments into a new
+   `CHANGELOG.md` section. This runs `changie batch`, strips the internal
+   `None` section from the generated version file, and merges it into
+   `CHANGELOG.md`. By default the version bump is auto-computed from the
+   fragments' kinds (`Added`/`Changed`/`Deprecated`/`Removed` → minor,
+   `Fixed`/`Security` → patch; see the comment in `.changie.yaml` for why
+   nothing maps to major while the project is pre-1.0); set
+   `VERSION=vX.Y.Z` to override it, e.g. `VERSION=v1.2.0 mise run
+   changelog`.
+
+   If the only unreleased fragments are `None`-kind, the auto-computed run
+   fails with changie's misleadingly-worded "no unreleased changes found for
+   automatic bumping" — that means nothing release-worthy has accumulated
+   yet, not that the fragments are missing. Don't force it with an explicit
+   `VERSION` in that state: it "succeeds" but produces an empty version
+   section and an empty GitHub Release body (verified). Wait for a fragment
+   with a real kind.
+
+   If something goes wrong partway through (for example `changie batch`
+   succeeds but a later step fails), the unreleased fragments have already
+   been consumed and simply re-running `mise run changelog` will fail with
+   "no unreleased changes found." Recover by restoring the pre-batch state —
+   `git checkout -- .changes/ && git clean -fd .changes/` — then re-run the
+   task.
+3. Review and commit the resulting `CHANGELOG.md` and `.changes/` changes.
+4. Tag and push: `git tag vX.Y.Z && git push origin master vX.Y.Z`.
+5. The `Release` GitHub Actions workflow (triggered by the tag push) runs
+   GoReleaser, which publishes the GitHub Release using the batched
+   `.changes/vX.Y.Z.md` file as the release notes.
