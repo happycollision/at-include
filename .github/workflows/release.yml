@@ -2,7 +2,8 @@ name: Release
 
 # Fires only on version tags (e.g. v1.2.3), pushed after CI has already
 # validated the commit being tagged. goreleaser does the actual GitHub
-# Release creation, changelog, and multi-platform archive upload.
+# Release creation (using changie's curated release notes) and
+# multi-platform archive upload.
 on:
   push:
     tags: ["v*"]
@@ -19,10 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # goreleaser's changelog generation walks commits since the previous
-          # tag, and its "current tag" detection needs the full tag history.
+          # goreleaser's "current tag" / "previous tag" detection (used for
+          # versioning and git-state validation) needs the full tag history.
           # A shallow checkout (the default) would only see the single commit
-          # the tag points at, breaking both.
+          # the tag points at, breaking that detection.
           fetch-depth: 0
 
       - uses: jdx/mise-action@v2
@@ -31,7 +32,29 @@ jobs:
           install: true
           cache: true
 
+      - name: Locate changie release notes for this tag
+        id: changie-notes
+        run: |
+          notes_path=".changes/${GITHUB_REF_NAME}.md"
+          if [[ ! -f "$notes_path" ]]; then
+            echo "::error::No changie version file found at $notes_path for tag $GITHUB_REF_NAME. Run 'mise run changelog' and commit .changes/ before tagging."
+            exit 1
+          fi
+          # Strip the version heading (line 1, "## vX.Y.Z - DATE") before
+          # handing the notes to goreleaser: the GitHub Release page already
+          # shows the tag/version as its title, so repeating it as the first
+          # line of the body is redundant. Changie's own release workflows do
+          # the same, but with `tail -n +3` — their generated files have a
+          # blank line after the heading; ours don't (verified against a real
+          # `mise run changelog` output with this repo's .changie.yaml
+          # newlines settings: heading on line 1, "### Kind" directly on
+          # line 2), so here it's `tail -n +2`.
+          stripped_path="$RUNNER_TEMP/release-notes.md"
+          tail -n +2 "$notes_path" > "$stripped_path"
+          echo "path=$stripped_path" >> "$GITHUB_OUTPUT"
+
       - name: Release
-        run: goreleaser release --clean
+        run: goreleaser release --clean --release-notes="$NOTES_PATH"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES_PATH: ${{ steps.changie-notes.outputs.path }}
