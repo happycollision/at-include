@@ -4,6 +4,7 @@ golangci-lint = "2.12.2"
 gofumpt = "0.11.0"
 goreleaser = "2.17.1"
 lefthook = "2.1.10"
+changie = "1.25.2"
 
 [env]
 # Prevent Go from auto-downloading a different toolchain than the one pinned above.
