@@ -38,24 +38,39 @@ mise run lint       # golangci-lint run
 mise run check      # what CI runs: gofumpt -l check, lint, then test
 ```
 
-## Changelog fragments (required before pushing to master)
+## Changelog fragments (one per change, before pushing to master)
 
-Every push to `master` that adds commits must also add a
-[Changie](https://changie.dev) fragment under `.changes/unreleased/` — this
-is enforced by a lefthook pre-push hook and a CI backstop. When your change
-is user-visible, add one with:
+Each user-visible change gets its own [Changie](https://changie.dev) fragment
+under `.changes/unreleased/`, created in the same commit as the change it
+describes:
 
 ```sh
 mise exec -- changie new --kind <Added|Changed|Deprecated|Removed|Fixed|Security> --body "Reader-facing description of the change"
 ```
 
-Write the body for a user of `at-include` deciding whether to upgrade, not
-as a commit subject. If the change genuinely warrants no changelog line
-(internal refactor, CI tweak), record that decision explicitly with
-`--kind None` instead of skipping the fragment. Do not run
-`mise run changelog` or touch `CHANGELOG.md` yourself — batching fragments
-is the human-driven release step, documented under "Releasing" in
-`README.md`.
+**One fragment per change, not per push.** A branch with three distinct
+user-visible changes gets three fragments. The pre-push hook and CI backstop
+only verify that *a* fragment was added somewhere in the pushed range, so
+they cannot catch a branch that bundled several changes under one entry —
+that granularity is your responsibility, and it's what makes the released
+changelog useful.
+
+Write the body for someone deciding whether to upgrade, not as a commit
+subject: describe what changed for them, not how you implemented it.
+
+If a change genuinely warrants no changelog line (internal refactor, CI
+tweak, test-only work), record that decision with `--kind None` rather than
+skipping the fragment — and say *why* it's exempt, since that note is the
+only record of the judgment call:
+
+```sh
+mise exec -- changie new --kind None --body "Test-only: adds fixture coverage for stdin handling, no behavior change."
+```
+
+Do not run `mise run changelog` or edit `CHANGELOG.md` yourself. Batching
+fragments is the human-driven release step (see "Releasing" in `README.md`),
+and touching `CHANGELOG.md` directly would satisfy the push check without
+actually recording a change.
 
 ## AGENTS.md is generated
 
