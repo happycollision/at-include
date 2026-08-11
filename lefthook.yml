@@ -99,3 +99,37 @@ pre-push:
   jobs:
     - name: check
       run: mise run check
+
+    # Blocks pushes to master that add commits without a Changie fragment
+    # under .changes/unreleased/. lefthook does NOT forward the pre-push
+    # stdin (lines of `<local-ref> <local-sha> <remote-ref> <remote-sha>`,
+    # one per ref being pushed) to a job's `run:` body by default — that was
+    # verified directly: a naive `run: | while read ...` job read zero
+    # lines, both via `lefthook run pre-push` and a real `git push` through
+    # an installed hook. `use_stdin: true` is required to receive it.
+    #
+    # lefthook executes `run:` blocks via `sh -c`, not bash (verified by
+    # probing the actual command run for a job's PID) — so this block must
+    # stay POSIX/dash-safe: single `[ ]`, not bash's `[[ ]]`. On macOS
+    # /bin/sh happens to be bash in POSIX mode so `[[ ]]` works there by
+    # luck, but on Debian/Ubuntu (most Linux CI runners and dev machines)
+    # /bin/sh is dash, where `[[` is a syntax error and the check would be
+    # silently skipped.
+    #
+    # `status` is accumulated across the whole loop and exited explicitly
+    # at the end, rather than letting the loop's exit code fall through:
+    # with multiple refs pushed in one command (e.g.
+    # `git push origin master feature-x`), the shell loop's exit status is
+    # otherwise just whatever the LAST line produced — so a failing master
+    # check followed by a passing (or non-matching) line would silently
+    # overwrite the failure and let the push through.
+    - name: check-changelog-fragment
+      use_stdin: true
+      run: |
+        status=0
+        while read -r local_ref local_sha remote_ref remote_sha; do
+          if [ "$remote_ref" = "refs/heads/master" ]; then
+            ./.github/scripts/check-changelog-fragment.sh . "$remote_sha" "$local_sha" || status=1
+          fi
+        done
+        exit "$status"
