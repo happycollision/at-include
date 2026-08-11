@@ -1,0 +1,43 @@
+changesDir: .changes
+unreleasedDir: unreleased
+headerPath: header.tpl.md
+changelogPath: CHANGELOG.md
+versionExt: md
+versionFormat: '## {{.Version}} - {{.Time.Format "2006-01-02"}}'
+kindFormat: '### {{.Kind}}'
+changeFormat: '* {{.Body}}'
+# Each kind's `auto:` is the semver bump `changie batch auto` applies when a
+# fragment of that kind is present (the largest bump across fragments wins).
+#
+# Changed and Removed are deliberately `minor`, not `major`:
+# - Keep-a-Changelog's "Changed" means "a change in existing functionality",
+#   not "breaking change" — mapping it to major would major-bump every
+#   ordinary behavior tweak.
+# - This project is pre-1.0, and changie applies no 0.x special-casing:
+#   verified against changie 1.25.2 that a single major-mapped fragment
+#   auto-bumps v0.3.0 straight to v1.0.0. Pre-1.0 semver convention puts
+#   breaking changes in the minor slot anyway.
+# - A genuinely breaking release (including the eventual 1.0) is a deliberate
+#   act: use the explicit override, e.g. `VERSION=v1.0.0 mise run changelog`.
+# Revisit at v1.0.0 — post-1.0, Removed (and breaking Changed) should map to
+# major.
+kinds:
+    - label: Added
+      auto: minor
+    - label: Changed
+      auto: minor
+    - label: Deprecated
+      auto: minor
+    - label: Removed
+      auto: minor
+    - label: Fixed
+      auto: patch
+    - label: Security
+      auto: patch
+    - label: None
+      auto: none
+newlines:
+    afterChangelogHeader: 1
+    beforeChangelogVersion: 1
+    endOfVersion: 1
+envPrefix: CHANGIE_
