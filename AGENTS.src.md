@@ -38,6 +38,25 @@ mise run lint       # golangci-lint run
 mise run check      # what CI runs: gofumpt -l check, lint, then test
 ```
 
+## Changelog fragments (required before pushing to master)
+
+Every push to `master` that adds commits must also add a
+[Changie](https://changie.dev) fragment under `.changes/unreleased/` — this
+is enforced by a lefthook pre-push hook and a CI backstop. When your change
+is user-visible, add one with:
+
+```sh
+mise exec -- changie new --kind <Added|Changed|Deprecated|Removed|Fixed|Security> --body "Reader-facing description of the change"
+```
+
+Write the body for a user of `at-include` deciding whether to upgrade, not
+as a commit subject. If the change genuinely warrants no changelog line
+(internal refactor, CI tweak), record that decision explicitly with
+`--kind None` instead of skipping the fragment. Do not run
+`mise run changelog` or touch `CHANGELOG.md` yourself — batching fragments
+is the human-driven release step, documented under "Releasing" in
+`README.md`.
+
 ## AGENTS.md is generated
 
 This file (`AGENTS.src.md`) is the source. **`AGENTS.md` is generated from it

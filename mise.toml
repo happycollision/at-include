@@ -4,6 +4,7 @@ golangci-lint = "2.12.2"
 gofumpt = "0.11.0"
 goreleaser = "2.17.1"
 lefthook = "2.1.10"
+changie = "1.25.2"
 
 [env]
 # Prevent Go from auto-downloading a different toolchain than the one pinned above.
@@ -63,4 +64,25 @@ description = "Verify AGENTS.md is up to date (CI gate, dogfoods at-include on t
 depends = ["build"]
 shell = "bash -c" # see the note on [tasks.build]
 run = "./dist/at-include --check"
+
+[tasks.changelog]
+description = "Batch unreleased changie fragments into CHANGELOG.md (VERSION=vX.Y.Z to override the auto-computed bump)"
+shell = "bash -c" # see the note on [tasks.build] — command substitution needs bash
+run = '''
+set -euo pipefail
+# changie accepts any version string verbatim, so VERSION=0.4.0 would happily
+# create .changes/0.4.0.md (verified) — inconsistent with the existing
+# v-prefixed files, and the documented `git tag vX.Y.Z` would then fail in
+# release.yml because .changes/v0.4.0.md doesn't exist. Catch it here, at the
+# moment of the typo, instead.
+case "${VERSION:-auto}" in
+  auto|v*) ;;
+  *) echo "VERSION must be v-prefixed (got '$VERSION'; try VERSION=v$VERSION)" >&2; exit 1 ;;
+esac
+changie batch "${VERSION:-auto}"
+version="${VERSION:-$(changie latest)}"
+./.github/scripts/strip-none-section.sh ".changes/${version}.md"
+changie merge
+echo "Batched and merged: $version"
+'''
 

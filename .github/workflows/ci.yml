@@ -22,6 +22,26 @@ jobs:
     # binary — has been verified green on windows-latest.
     steps:
       - uses: actions/checkout@v4
+        with:
+          # check-changelog-fragment.sh (see the step below) needs to run
+          # `git rev-list`/`git diff` over the range `before push`..`after push`.
+          # A shallow checkout (the default, depth 1) only has the single commit
+          # being checked out, so `before` — the branch's prior tip — is
+          # typically missing from history and the range fails to resolve
+          # (`git rev-list`/`git diff` exit 128, "bad revision"), which would
+          # fail every push regardless of whether a changelog fragment was
+          # added.
+          #
+          # A small fixed depth (e.g. 2) is NOT a safe substitute: it only
+          # covers pushes smaller than that depth. Verified locally by cloning
+          # this repo at various depths and resolving a real 3-commit range
+          # (3 pushed commits + the before-commit = depth 4 needed): depth 3
+          # failed with "bad revision", depth 4 succeeded. Since push size is
+          # unbounded (a multi-commit merge, a batch of local commits, etc.)
+          # and CI can't know it ahead of time, only full history is
+          # guaranteed correct — same underlying class of problem as
+          # release.yml's checkout (see its comment), different trigger.
+          fetch-depth: 0
 
       - uses: jdx/mise-action@v2
         with:
@@ -53,4 +73,56 @@ jobs:
       # branching or scoping like the fixture suite's isWindows() handling.
       - name: Verify AGENTS.md is up to date
         run: mise run docs:check
+        shell: bash
+
+      # After-the-fact backstop for lefthook's pre-push hook (see lefthook.yml):
+      # that hook is local-only, skippable (--no-verify), and requires local
+      # setup, so a missed changelog fragment can still reach master.
+      # pull_request events do have their own base/head SHAs
+      # (github.event.pull_request.base.sha / .head.sha), but this check is
+      # deliberately scoped to push-to-master only for now, per the current
+      # enforcement design: lefthook locally plus this CI push backstop, no PR
+      # gate yet, and branch protection isn't enabled either — master stays
+      # directly push-able rather than routing everything through PRs.
+      #
+      # Gated to one matrix leg for the same reason as the changie dry-run
+      # below: a git range diff has no OS-dependent behavior, so three
+      # identical verdicts add noise, not coverage.
+      - name: Verify changelog fragment was added (push to master only)
+        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest'
+        run: ./.github/scripts/check-changelog-fragment.sh . "${{ github.event.before }}" "${{ github.sha }}"
+        shell: bash
+
+      # Regression coverage for the two bespoke release-tooling scripts:
+      # check-changelog-fragment.sh (the step above) and strip-none-section.sh
+      # (run by `mise run changelog`, see mise.toml). Each has a self-contained
+      # test harness next to it, and without this step they run nowhere
+      # automatically — a regression would only surface when a real push or
+      # release misbehaved. Gated to one matrix leg like the other
+      # pure-file-I/O checks here.
+      - name: Test release-tooling scripts
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          ./.github/scripts/check-changelog-fragment_test.sh
+          ./.github/scripts/strip-none-section_test.sh
+        shell: bash
+
+      # Changie's documented CI recommendation (changie.dev/integrations/ci/):
+      # a dry-run batch that parses every fragment under .changes/unreleased/,
+      # catching malformed YAML or an unknown kind before release time instead
+      # of at the next real `mise run changelog`. Uses the repo's pinned mise
+      # changie rather than the third-party changie-action.
+      #
+      # Deliberately `major`, not `auto`: with an explicit bump level the
+      # dry-run exits 0 when unreleased/ is empty (verified against changie
+      # 1.25.2), whereas `auto` fails there with "no unreleased changes found
+      # for automatic bumping" — so no fragment-count guard is needed. The
+      # level itself is irrelevant; --dry-run writes nothing.
+      #
+      # Gated to one matrix leg: fragment parsing is pure file I/O with no
+      # OS-dependent behavior, so running it three times adds noise, not
+      # coverage.
+      - name: Validate changie fragments parse (dry-run batch)
+        if: matrix.os == 'ubuntu-latest'
+        run: mise exec -- changie batch major --dry-run > /dev/null
         shell: bash

@@ -1,0 +1,3 @@
+kind: None
+body: 'Internal release-tooling fixes: changelog-fragment gate now accepts release commits and gives a clear verdict on force-pushes and ref deletions, release notes drop the redundant version heading, CI validates fragment YAML and runs the tooling-script test harnesses, and the changelog task rejects a non-v-prefixed VERSION.'
+time: 2026-08-08T14:52:50.593377-04:00
