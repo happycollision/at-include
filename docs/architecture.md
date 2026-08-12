@@ -2,13 +2,16 @@
 
 ```
 cmd/at-include        thin main: argv/env in, cli.Run's exit code out
-internal/cli          flag parsing, exit codes, usage text (cli.go)
+internal/cli          subcommand dispatch, flag parsing, exit codes, usage
+                        text (cli.go)
 internal/flatten       the @path scan/expand/check logic
   scan.go              fence/inline-code state machine + FindImports
-                        (used by --list-imports, not by expansion itself)
+                        (used by the imports subcommand, not by expansion
+                        itself)
   expand.go            the recursive expander (Flatten/Options/expander)
   banner.go            the generated-file banner + output assembly
-  check.go             --check: regenerate in memory, diff against disk
+  check.go             the check subcommand: regenerate in memory, diff
+                        against disk
 test/                  black-box fixture suite driving the built binary
 ```
 
@@ -17,7 +20,7 @@ codes, and all user-facing text belong in `internal/cli`. All import-flattening
 logic belongs in `internal/flatten` and should have no knowledge of flags or
 exit codes.
 
-`scan.go`'s `FindImports` (used by `--list-imports`) and `expand.go`'s
+`scan.go`'s `FindImports` (used by the `imports` subcommand) and `expand.go`'s
 expander share one token-scanning rule — see `scanLine`'s doc comment for the
 exact statement. In outline: a `@` starts a token only at line start or
 immediately after whitespace; the token then runs to the next whitespace
@@ -25,7 +28,7 @@ character, except that a backslash-space pair (`\ `) is an escaped space that
 continues it; and everything from the first `#` onward is a fragment that is
 dropped from the resolved path. Fenced code blocks are skipped entirely by
 both, and inline code spans are left verbatim during expansion, so
-`--list-imports` always reports exactly the tokens the expander would consider.
+`imports` always reports exactly the tokens the expander would consider.
 
 These rules were modeled on Claude Code's own import scanner
 (`/(?:^|\s)@((?:[^\s\\]|\\ )+)/g`, then truncate at the first `#`, then
