@@ -87,7 +87,7 @@ and piped stdin content is transient.
 
 Options:
   --src <path>        Source file (default: AGENTS.src.md)
-  --out <path>        Output file (default: AGENTS.md)
+  --out <path>        Output file (default: AGENTS.md); "-" is not accepted
   --root <path>       Root for marker paths (default: the source file's
                       directory)
   --max-depth <n>     Error if a resolved import chain exceeds n hops
@@ -161,12 +161,13 @@ type commandSpec struct {
 	takesDepth   bool // --max-depth
 	takesMarker  bool // --marker-desc
 	allowSrcDash bool // is `--src -` (stdin) accepted?
+	allowOutDash bool // is `--out -` (stdout) accepted?
 }
 
 var commands = map[string]commandSpec{
-	"build":      {name: "build", usage: buildUsage, defaultSrc: defaultSrc, defaultOut: defaultOut, takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: true},
-	"check":      {name: "check", usage: checkUsage, defaultSrc: defaultSrc, defaultOut: defaultOut, takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: false},
-	"supplement": {name: "supplement", usage: supplementUsage, defaultSrc: "AGENTS.md", defaultOut: "-", takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: true},
+	"build":      {name: "build", usage: buildUsage, defaultSrc: defaultSrc, defaultOut: defaultOut, takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: true, allowOutDash: true},
+	"check":      {name: "check", usage: checkUsage, defaultSrc: defaultSrc, defaultOut: defaultOut, takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: false, allowOutDash: false},
+	"supplement": {name: "supplement", usage: supplementUsage, defaultSrc: "AGENTS.md", defaultOut: "-", takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: true, allowOutDash: true},
 	"imports":    {name: "imports", usage: importsUsage, defaultSrc: defaultSrc, defaultOut: "-", allowSrcDash: true},
 }
 
@@ -587,6 +588,10 @@ func parseFlags(spec commandSpec, argv []string) (options, error) {
 			v, err := value(argv, &i, a)
 			if err != nil {
 				return o, err
+			}
+			if v == "-" && !spec.allowOutDash {
+				return o, fmt.Errorf("%s does not accept --out - "+
+					"(%s compares against an on-disk generated file; stdout is not re-readable)", spec.name, spec.name)
 			}
 			o.out, o.outSet = v, true
 		case "--root":

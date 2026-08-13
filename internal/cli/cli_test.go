@@ -924,6 +924,17 @@ func TestRunCheckWithSrcDashIsUsageError(t *testing.T) {
 	}
 }
 
+func TestRunCheckWithOutDashIsUsageError(t *testing.T) {
+	dir := writeTree(t, map[string]string{"AGENTS.src.md": "Body\n"})
+	code, _, stderr := run(t, dir, []string{"check", "--out", "-"}, "")
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "check does not accept --out -") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
 func TestRunListImportsSrcDash(t *testing.T) {
 	dir := writeTree(t, map[string]string{})
 	code, stdout, stderr := run(t, dir, []string{"imports", "--src", "-"}, "@a.md and `@b.md` and @c.md\n")
