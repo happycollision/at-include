@@ -86,7 +86,7 @@ func tail(s string) string {
 	return s
 }
 
-func TestGenerateHookModeUsesPreambleNotBanner(t *testing.T) {
+func TestGenerateSupplementUsesPreambleNotBanner(t *testing.T) {
 	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.md": "Body line\n\n@x.md\n",
@@ -94,7 +94,7 @@ func TestGenerateHookModeUsesPreambleNotBanner(t *testing.T) {
 	})
 	opts := optsFor(root)
 	opts.SrcPath = filepath.Join(root, "AGENTS.md")
-	opts.HookMode = true
+	opts.Supplement = true
 	out, err := Generate(opts)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)

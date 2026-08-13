@@ -154,7 +154,7 @@ func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	fOpts.HookMode = opts.hookMode
+	fOpts.Supplement = opts.hookMode
 
 	switch {
 	case opts.listImports:
@@ -296,7 +296,7 @@ func isParentTraversal(rel string) bool {
 }
 
 func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
-	if fOpts.HookMode && fOpts.Stdin == nil {
+	if fOpts.Supplement && fOpts.Stdin == nil {
 		if _, err := os.Stat(fOpts.SrcPath); errors.Is(err, os.ErrNotExist) {
 			if !fOpts.OutIsStdout {
 				// A previous run may have written real content to this file; leaving
@@ -323,10 +323,10 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 	}
 	var assembled string
 	switch {
-	// HookMode must be checked before Stdin != nil: --hook-mode --src - should
+	// Supplement must be checked before Stdin != nil: --hook-mode --src - should
 	// still get the hook preamble, not the no-banner stdin-piping treatment.
-	case fOpts.HookMode:
-		assembled = flatten.Assemble(flatten.HookPreamble(), content)
+	case fOpts.Supplement:
+		assembled = flatten.Assemble(flatten.SupplementPreamble(), content)
 	case fOpts.Stdin != nil:
 		assembled = assembleNoBanner(content)
 	default:
@@ -345,7 +345,7 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 		fprintf(stderr, "at-include: %s\n", err)
 		return 1
 	}
-	if !fOpts.HookMode {
+	if !fOpts.Supplement {
 		fprintf(stdout, "Generated %s from %s (%d files inlined).\n",
 			fOpts.OutName, fOpts.SrcName, inlined)
 	}

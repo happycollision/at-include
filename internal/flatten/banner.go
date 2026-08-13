@@ -27,11 +27,12 @@ func Banner(opts Options) string {
 	}, "\n")
 }
 
-// HookPreamble renders the fixed framing text prepended to --hook-mode
-// output. Unlike Banner, it takes no Options: the wording never varies by
-// source/output name, and there is no --marker-desc-style override for it —
-// hook-mode's preamble is intentionally not configurable.
-func HookPreamble() string {
+// SupplementPreamble renders the fixed framing text prepended to the
+// supplement command's output. Unlike Banner, it takes no Options: the
+// wording never varies by source/output name, and there is no
+// --marker-desc-style override for it — the supplement command's preamble is
+// intentionally not configurable.
+func SupplementPreamble() string {
 	return strings.Join([]string{
 		"We use `@path` import syntax in Markdown docs (e.g. `AGENTS.md`) to",
 		"reference other files.",
