@@ -100,10 +100,10 @@ func TestGenerateSupplementUsesPreambleNotBanner(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	if strings.Contains(out, "This file is generated") {
-		t.Errorf("hook-mode output should not contain the normal banner\ngot:\n%s", out)
+		t.Errorf("supplement output should not contain the normal banner\ngot:\n%s", out)
 	}
 	if !strings.Contains(out, "pre-expanded") {
-		t.Errorf("hook-mode output should contain the hook preamble\ngot:\n%s", out)
+		t.Errorf("supplement output should contain the supplement preamble\ngot:\n%s", out)
 	}
 	for _, want := range []string{"Body line", "X-CONTENT"} {
 		if !strings.Contains(out, want) {

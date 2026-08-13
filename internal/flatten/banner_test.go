@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestBannerRegenCommandLine(t *testing.T) {
+	t.Parallel()
+	b := Banner(Options{})
+	want := "> `at-include build --src AGENTS.src.md --out AGENTS.md`"
+	if !strings.Contains(b, want) {
+		t.Errorf("banner missing regen command line %q\ngot:\n%s", want, b)
+	}
+}
+
 func TestSupplementPreambleMentionsImportSyntaxAndUnresolvedPointer(t *testing.T) {
 	t.Parallel()
 	p := SupplementPreamble()

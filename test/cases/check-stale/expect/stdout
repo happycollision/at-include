@@ -1,5 +1,5 @@
 ~
-AGENTS.md is out of date. Run: at-include
+AGENTS.md is out of date. Run: at-include build
 First difference around line 15:
 - Shared content, version two.
 + Shared content, version two, EDITED after generation.

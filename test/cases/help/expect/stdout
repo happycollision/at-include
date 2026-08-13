@@ -1,9 +1,11 @@
 ~
-Usage: at-include [options]
+Usage: at-include <command> [options]
+Commands:
+build
+check
+supplement
+imports
 Options:
---check
---hook-mode
---src <path>
 --version
 --help, -h
 Exit codes: 0 success, 1 out-of-date or runtime error, 2 usage error.

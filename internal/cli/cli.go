@@ -1,7 +1,7 @@
-// Package cli implements the at-include command line: argument parsing and
-// the generate/--check/--list-imports/--version/--help behaviors described in
-// the design spec. It is a thin wrapper over internal/flatten — all of the
-// actual import-flattening logic lives there.
+// Package cli implements the at-include command line: the build/check/
+// supplement/imports subcommands, their argument parsing, and --version/
+// --help. It is a thin wrapper over internal/flatten — all of the actual
+// import-flattening logic lives there.
 package cli
 
 import (
@@ -33,48 +33,109 @@ const (
 	defaultOut = "AGENTS.md"
 )
 
-const usage = `Usage: at-include [options]
+const usage = `Usage: at-include <command> [options]
 
-Flatten @<path> Markdown imports, following the same conventions Claude Code
+Expand @<path> Markdown imports, following the same conventions Claude Code
 uses to inline files referenced from a CLAUDE.md. Reads a source file, replaces
 every @<path> that resolves to a real file with that file's contents
 (recursively), and writes the result. Close to Claude Code's behavior by intent,
 but an independent implementation — not guaranteed to match it exactly.
 
+Commands:
+  build        Expand --src's @imports and write --out, prefixed with the
+               generated-file banner. The build-time flattening strategy.
+  check        Verify --out is up to date with --src; exit nonzero (without
+               writing anything) if not. The CI gate for ` + "`build`" + `.
+  supplement   Expand --src's @imports and write the result framed as
+               supplementary agent context, for piping into an agent
+               lifecycle hook. The load-time expansion strategy.
+  imports      Print the @path candidates found in --src, one per line.
+
 Options:
-  (no args)           Generate and write the output file
-  --check             Verify the output file is up to date; exit nonzero if not
-  --hook-mode         Prepend a fixed @import-explainer preamble instead of the
-                      generated-file banner; --src defaults to AGENTS.md and
-                      --out defaults to stdout. For piping into an agent
-                      lifecycle hook, not for writing a checked-in file.
-  --src <path>        Source file (default: AGENTS.src.md); "-" reads from stdin
-  --out <path>        Output file (default: AGENTS.md); "-" writes to stdout
-  --root <path>       Root for marker paths (default: the source file's directory,
-                      or the current directory when --src is "-")
-  --max-depth <n>     Error if a resolved import chain exceeds n hops
-  --marker-desc <s>   Override the text in "Contents of X (<s>):"
-  --list-imports      Print the @path candidates found in the source, one per line
-  --version           Print the version
-  --help, -h          Show this help
+  --version    Print the version
+  --help, -h   Show this help; ` + "`at-include <command> --help`" + ` describes one
+               command and its options
 
 Exit codes: 0 success, 1 out-of-date or runtime error, 2 usage error.
+`
 
-Notes on --src -:
-  --check cannot be combined with --src - (stdin content isn't a stable basis
-  for an "is the output stale" comparison). --out defaults to stdout when
-  --src is - and --out isn't given explicitly. The generated-file banner is
-  never printed when --src is -.
+const buildUsage = `Usage: at-include build [options]
+
+Expand --src's @imports and write --out, prefixed with the
+generated-file banner. The build-time flattening strategy.
+
+Options:
+  --src <path>        Source file (default: AGENTS.src.md); "-" reads from stdin
+  --out <path>        Output file (default: AGENTS.md); "-" writes to stdout
+  --root <path>       Root for marker paths (default: the source file's
+                      directory, or the current directory when --src is "-")
+  --max-depth <n>     Error if a resolved import chain exceeds n hops
+                      (default: no limit — cycles terminate on their own)
+  --marker-desc <s>   Override the text in "Contents of X (<s>):"
+  --help, -h          Show this help
+
+Exit codes: 0 success, 1 runtime error, 2 usage error.
+`
+
+const checkUsage = `Usage: at-include check [options]
+
+Verify --out is up to date with --src; exit nonzero (without writing
+anything) if not. The CI gate for build.
+
+--src - is not accepted: check needs a re-readable file to compare against,
+and piped stdin content is transient.
+
+Options:
+  --src <path>        Source file (default: AGENTS.src.md)
+  --out <path>        Output file (default: AGENTS.md)
+  --root <path>       Root for marker paths (default: the source file's
+                      directory)
+  --max-depth <n>     Error if a resolved import chain exceeds n hops
+                      (default: no limit — cycles terminate on their own)
+  --marker-desc <s>   Override the text in "Contents of X (<s>):"
+  --help, -h          Show this help
+
+Exit codes: 0 up to date, 1 out of date or runtime error, 2 usage error.
+`
+
+const supplementUsage = `Usage: at-include supplement [options]
+
+Expand --src's @imports and write the result framed as
+supplementary agent context, for piping into an agent lifecycle hook. The
+load-time expansion strategy.
+
+A missing --src (default or explicit) produces empty output and exit 0,
+silently — there is no safe channel to report an error into a hook payload
+that becomes model context.
+
+Options:
+  --src <path>        Source file (default: AGENTS.md); "-" reads from stdin
+  --out <path>        Output file (default: -, i.e. stdout); "-" writes to stdout
+  --root <path>       Root for marker paths (default: the source file's
+                      directory, or the current directory when --src is "-")
+  --max-depth <n>     Error if a resolved import chain exceeds n hops
+                      (default: no limit — cycles terminate on their own)
+  --marker-desc <s>   Override the text in "Contents of X (<s>):"
+  --help, -h          Show this help
+
+Exit codes: 0 success, 1 runtime error, 2 usage error.
+`
+
+const importsUsage = `Usage: at-include imports [options]
+
+Print the @path candidates found in --src, one per line.
+
+Options:
+  --src <path>        Source file (default: AGENTS.src.md); "-" reads from stdin
+  --help, -h          Show this help
+
+Exit codes: 0 success, 1 runtime error, 2 usage error.
 `
 
 // options holds the parsed command line, before paths are resolved against a
 // working directory.
 type options struct {
-	check         bool
 	help          bool
-	version       bool
-	listImports   bool
-	hookMode      bool
 	src           string
 	srcSet        bool
 	out           string
@@ -87,10 +148,32 @@ type options struct {
 	maxDepthSet   bool
 }
 
+// commandSpec describes one subcommand: its defaults, which flags it
+// accepts beyond --src/--help, and its usage text. --version is top-level
+// only, deliberately: `at-include build --version` is an unknown flag.
+type commandSpec struct {
+	name         string
+	usage        string
+	defaultSrc   string
+	defaultOut   string
+	takesOut     bool // --out
+	takesRoot    bool // --root
+	takesDepth   bool // --max-depth
+	takesMarker  bool // --marker-desc
+	allowSrcDash bool // is `--src -` (stdin) accepted?
+}
+
+var commands = map[string]commandSpec{
+	"build":      {name: "build", usage: buildUsage, defaultSrc: defaultSrc, defaultOut: defaultOut, takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: true},
+	"check":      {name: "check", usage: checkUsage, defaultSrc: defaultSrc, defaultOut: defaultOut, takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: false},
+	"supplement": {name: "supplement", usage: supplementUsage, defaultSrc: "AGENTS.md", defaultOut: "-", takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: true},
+	"imports":    {name: "imports", usage: importsUsage, defaultSrc: defaultSrc, allowSrcDash: true},
+}
+
 // usageError marks a resolveOptions failure as a usage error (bad flag
 // combination, detectable before doing any work) rather than a runtime error
 // (something that went wrong while acting on otherwise-valid flags). Run maps
-// this to exit code 2, matching the same code parseArgs failures already use,
+// this to exit code 2, matching the same code parseFlags failures already use,
 // since both are "the invocation itself is wrong" rather than "the invocation
 // was fine but something failed while executing it".
 type usageError struct{ err error }
@@ -105,40 +188,39 @@ func (e *usageError) Unwrap() error { return e.err }
 // within a repo. stdin supplies the source text when `--src -` is given; it
 // is otherwise unused.
 func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	opts, err := parseArgs(argv)
-	if err != nil {
-		fprintf(stderr, "%s\n\n%s", err, usage)
+	if len(argv) == 0 {
+		fprintf(stderr, "at-include: a command is required\n\n%s", usage)
 		return 2
 	}
-	if opts.help {
+	switch argv[0] {
+	case "--help", "-h":
 		fprint(stdout, usage)
 		return 0
-	}
-	if opts.version {
+	case "--version":
 		fprintf(stdout, "at-include %s\n", Version)
 		return 0
 	}
-
-	if opts.hookMode && !opts.listImports {
-		if !opts.srcSet {
-			opts.src = "AGENTS.md"
-		}
-		if !opts.outSet {
-			opts.out = "-"
-		}
+	spec, ok := commands[argv[0]]
+	if !ok {
+		fprintf(stderr, "at-include: unknown command: %s\n\n%s", argv[0], usage)
+		return 2
 	}
 
-	if opts.check && opts.hookMode {
-		fprintf(stderr, "at-include: --check cannot be combined with --hook-mode "+
-			"(--check compares against an on-disk generated file; hook mode has no such file)\n\n%s", usage)
+	opts, err := parseFlags(spec, argv[1:])
+	if err != nil {
+		fprintf(stderr, "at-include: %s\n\n%s", err, spec.usage)
 		return 2
+	}
+	if opts.help {
+		fprint(stdout, spec.usage)
+		return 0
 	}
 
 	fOpts, err := resolveOptions(opts)
 	if err != nil {
 		var uerr *usageError
 		if errors.As(err, &uerr) {
-			fprintf(stderr, "at-include: %s\n\n%s", err, usage)
+			fprintf(stderr, "at-include: %s\n\n%s", err, spec.usage)
 			return 2
 		}
 		fprintf(stderr, "at-include: %s\n", err)
@@ -147,21 +229,14 @@ func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if opts.src == "-" {
 		fOpts.Stdin = stdin
 	}
+	fOpts.Supplement = spec.name == "supplement"
 
-	if opts.check && opts.src == "-" {
-		fprintf(stderr, "at-include: --check cannot be combined with --src - "+
-			"(stdin content is transient and can't be compared against on a later run)\n\n%s", usage)
-		return 2
-	}
-
-	fOpts.Supplement = opts.hookMode
-
-	switch {
-	case opts.listImports:
+	switch spec.name {
+	case "imports":
 		return runListImports(fOpts, stdout, stderr)
-	case opts.check:
+	case "check":
 		return runCheck(opts, fOpts, stdout, stderr)
-	default:
+	default: // build, supplement
 		return runGenerate(fOpts, stdout, stderr)
 	}
 }
@@ -323,8 +398,8 @@ func runGenerate(fOpts flatten.Options, stdout, stderr io.Writer) int {
 	}
 	var assembled string
 	switch {
-	// Supplement must be checked before Stdin != nil: --hook-mode --src - should
-	// still get the hook preamble, not the no-banner stdin-piping treatment.
+	// Supplement must be checked before Stdin != nil: `supplement --src -` should
+	// still get the supplement preamble, not the no-banner stdin-piping treatment.
 	case fOpts.Supplement:
 		assembled = flatten.Assemble(flatten.SupplementPreamble(), content)
 	case fOpts.Stdin != nil:
@@ -390,7 +465,7 @@ func runListImports(fOpts flatten.Options, stdout, stderr io.Writer) int {
 		}
 	} else {
 		// #nosec G304 -- fOpts.SrcPath is the tool's own configured source file
-		// (the same path Flatten itself reads); --list-imports just needs the raw
+		// (the same path Flatten itself reads); imports just needs the raw
 		// text to scan for @tokens instead of the fully expanded output.
 		var err error
 		data, err = os.ReadFile(fOpts.SrcPath)
@@ -443,7 +518,7 @@ func fprintf(w io.Writer, format string, a ...any) {
 // consult markerDescSet, which we do (see below) — so that case is in fact
 // handled correctly, unlike an earlier draft that only compared against "".
 func regenCommand(opts options) string {
-	parts := []string{"at-include"}
+	parts := []string{"at-include", "build"}
 	if opts.src != defaultSrc {
 		parts = append(parts, "--src", shellQuote(opts.src))
 	}
@@ -485,45 +560,57 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-func parseArgs(argv []string) (options, error) {
-	o := options{src: defaultSrc, out: defaultOut}
+// parseFlags parses argv (the arguments after the subcommand name) against
+// spec's allowlist. Flags spec doesn't accept for this command (e.g. --out
+// for imports, or --check anywhere — that flag no longer exists at all)
+// report "unknown flag", matching the wording an unrecognized flag gets.
+func parseFlags(spec commandSpec, argv []string) (options, error) {
+	o := options{src: spec.defaultSrc, out: spec.defaultOut}
 	for i := 0; i < len(argv); i++ {
 		switch a := argv[i]; a {
-		case "--check":
-			o.check = true
-		case "--hook-mode":
-			o.hookMode = true
 		case "--help", "-h":
 			o.help = true
-		case "--version":
-			o.version = true
-		case "--list-imports":
-			o.listImports = true
 		case "--src":
 			v, err := value(argv, &i, a)
 			if err != nil {
 				return o, err
 			}
+			if v == "-" && !spec.allowSrcDash {
+				return o, fmt.Errorf("%s does not accept --src - "+
+					"(stdin content is transient and can't be compared against on a later run)", spec.name)
+			}
 			o.src, o.srcSet = v, true
 		case "--out":
+			if !spec.takesOut {
+				return o, fmt.Errorf("unknown flag for %s: %s", spec.name, a)
+			}
 			v, err := value(argv, &i, a)
 			if err != nil {
 				return o, err
 			}
 			o.out, o.outSet = v, true
 		case "--root":
+			if !spec.takesRoot {
+				return o, fmt.Errorf("unknown flag for %s: %s", spec.name, a)
+			}
 			v, err := value(argv, &i, a)
 			if err != nil {
 				return o, err
 			}
 			o.root, o.rootSet = v, true
 		case "--marker-desc":
+			if !spec.takesMarker {
+				return o, fmt.Errorf("unknown flag for %s: %s", spec.name, a)
+			}
 			v, err := value(argv, &i, a)
 			if err != nil {
 				return o, err
 			}
 			o.markerDesc, o.markerDescSet = v, true
 		case "--max-depth":
+			if !spec.takesDepth {
+				return o, fmt.Errorf("unknown flag for %s: %s", spec.name, a)
+			}
 			var raw string
 			if i+1 < len(argv) {
 				raw = argv[i+1]
@@ -535,7 +622,7 @@ func parseArgs(argv []string) (options, error) {
 			}
 			o.maxDepth, o.maxDepthSet = n, true
 		default:
-			return o, fmt.Errorf("unknown argument: %s", a)
+			return o, fmt.Errorf("unknown flag for %s: %s", spec.name, a)
 		}
 	}
 	return o, nil

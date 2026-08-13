@@ -1,4 +1,2 @@
 ~
---check
---src -
-Usage
+check does not accept --src -
