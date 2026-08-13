@@ -113,8 +113,8 @@ printf '     | %s\n' "$version_out"
 assert_eq "--version reports the released version" \
   "at-include ${expected_version}" "$version_out"
 
-# --- 2. A generate run produces correct output ------------------------------
-assert_exit "generate exits 0" 0 at-include
+# --- 2. A build run produces correct output ---------------------------------
+assert_exit "build exits 0" 0 at-include build
 
 generated="$(cat AGENTS.md)"
 
@@ -143,32 +143,32 @@ else
     "dev@example.com and/or @scope/pkg were altered"
 fi
 
-# --- 3. --check is a working CI gate ---------------------------------------
-assert_exit "--check exits 0 when fresh" 0 at-include --check
+# --- 3. check is a working CI gate ------------------------------------------
+assert_exit "check exits 0 when fresh" 0 at-include check
 
 # Editing an imported file (not the source) makes the output stale — the
 # realistic way a repo drifts, and the case a naive mtime check would miss.
 printf 'Shared note, EDITED.\n' > notes/shared.md
-assert_exit "--check exits 1 when stale" 1 at-include --check
+assert_exit "check exits 1 when stale" 1 at-include check
 
-# The regeneration command --check prints must actually work. Extract it from
+# The regeneration command check prints must actually work. Extract it from
 # the message ("<out> is out of date. Run: <cmd>") and run it, rather than
 # hardcoding an assumption about what it says.
 #
-# `at-include --check` exits 1 here (the output is still stale, by design),
+# `at-include check` exits 1 here (the output is still stale, by design),
 # and under `set -o pipefail` that failure would propagate out of the command
 # substitution and kill the script via `set -e`. `|| true` on the producing
 # command keeps the pipeline's status zero while still capturing its stdout.
-regen_cmd="$( { at-include --check || true; } | sed -n 's/^.* is out of date\. Run: //p' | head -1)"
+regen_cmd="$( { at-include check || true; } | sed -n 's/^.* is out of date\. Run: //p' | head -1)"
 if [ -z "$regen_cmd" ]; then
-  fail "--check prints a regeneration command" "no 'Run:' line found in --check output"
+  fail "check prints a regeneration command" "no 'Run:' line found in check output"
 else
   printf '     | regeneration command: %s\n' "$regen_cmd"
   # shellcheck disable=SC2086 # intentional word splitting: this is a command line
-  if $regen_cmd >/dev/null 2>&1 && at-include --check >/dev/null 2>&1; then
-    pass "the regeneration command --check prints actually works"
+  if $regen_cmd >/dev/null 2>&1 && at-include check >/dev/null 2>&1; then
+    pass "the regeneration command check prints actually works"
   else
-    fail "the regeneration command --check prints actually works" \
+    fail "the regeneration command check prints actually works" \
       "running '$regen_cmd' did not bring AGENTS.md up to date"
   fi
 fi
@@ -180,7 +180,7 @@ fi
 # of the guard is that the source file survives.
 before="$(cksum < AGENTS.src.md)"
 assert_exit "--out equal to --src exits 2" 2 \
-  at-include --src AGENTS.src.md --out AGENTS.src.md
+  at-include build --src AGENTS.src.md --out AGENTS.src.md
 after="$(cksum < AGENTS.src.md)"
 assert_eq "--out equal to --src leaves the source untouched" "$before" "$after"
 
