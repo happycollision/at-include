@@ -179,7 +179,7 @@ func (e *expander) transform(text, importerAbsPath string, depth int) (string, e
 // transformLine rebuilds one line: inline code spans are kept verbatim
 // (backticks included) and resolvable @tokens are replaced. It splits the
 // line into pieces with the same scanLine rule FindImports uses (scan.go), so
-// --list-imports always reports exactly the tokens expansion would consider.
+// `imports` always reports exactly the tokens expansion would consider.
 func (e *expander) transformLine(line, importerDir string, depth int) (string, error) {
 	var b strings.Builder
 	for _, piece := range scanLine(line) {

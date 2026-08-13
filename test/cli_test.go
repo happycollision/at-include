@@ -304,7 +304,7 @@ func compareFiles(t *testing.T, expectFiles, work string) {
 // blank lines and #-comments ignored) and fails the test if any listed path
 // exists in work. This is the counterpart compareFiles is missing on its
 // own: compareFiles only ever checks paths it's told to expect, so it can
-// never notice an UNEXPECTED file the tool wrote (e.g. --list-imports or a
+// never notice an UNEXPECTED file the tool wrote (e.g. `imports` or a
 // usage error accidentally still producing an output file). expect/absent
 // makes "this file must not exist" an explicit, positive assertion instead of
 // something compareFiles's silence could be mistaken for.
