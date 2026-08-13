@@ -510,7 +510,7 @@ func fprintf(w io.Writer, format string, a ...any) {
 // pointing at a different file entirely), and it drops --root altogether
 // (root-relative names never mention root, so a caller running with
 // `--root .` would get a suggestion missing --root, which then resolves
-// markers against a different root and fails --check all over again).
+// markers against a different root and fails `check` all over again).
 //
 // So: echo back opts's typed values, comparing each against its default to
 // decide whether to include the flag at all. One synthetic edge case is worth
@@ -616,11 +616,10 @@ func parseFlags(spec commandSpec, argv []string) (options, error) {
 			if !spec.takesDepth {
 				return o, fmt.Errorf("unknown flag for %s: %s", spec.name, a)
 			}
-			var raw string
-			if i+1 < len(argv) {
-				raw = argv[i+1]
+			raw, err := value(argv, &i, a)
+			if err != nil {
+				return o, err
 			}
-			i++
 			n, err := strconv.Atoi(raw)
 			if err != nil || n < 0 {
 				return o, fmt.Errorf("--max-depth requires a non-negative integer, got: %s", raw)

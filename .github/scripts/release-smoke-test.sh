@@ -113,6 +113,10 @@ printf '     | %s\n' "$version_out"
 assert_eq "--version reports the released version" \
   "at-include ${expected_version}" "$version_out"
 
+# A bare invocation names no command, which is a usage error (exit 2) rather
+# than a default action — the subcommand CLI's front door.
+assert_exit "bare invocation is a usage error" 2 at-include
+
 # --- 2. A build run produces correct output ---------------------------------
 assert_exit "build exits 0" 0 at-include build
 
@@ -143,7 +147,16 @@ else
     "dev@example.com and/or @scope/pkg were altered"
 fi
 
-# --- 3. check is a working CI gate ------------------------------------------
+# --- 3. The other two subcommands run at all --------------------------------
+#
+# Shallow on purpose: the main suite covers what they emit. What a release
+# archive can break — and this can't get from source — is a subcommand that
+# isn't wired up in the shipped binary at all. `supplement` defaults --src to
+# AGENTS.md, which only exists now that build has run.
+assert_exit "supplement exits 0" 0 at-include supplement
+assert_exit "imports exits 0" 0 at-include imports
+
+# --- 4. check is a working CI gate ------------------------------------------
 assert_exit "check exits 0 when fresh" 0 at-include check
 
 # Editing an imported file (not the source) makes the output stale — the
@@ -173,7 +186,7 @@ else
   fi
 fi
 
-# --- 4. The --out == --src guard ------------------------------------------
+# --- 5. The --out == --src guard ------------------------------------------
 #
 # Exits 2 (usage error) and leaves the hand-authored source byte-for-byte
 # intact. Compare a hash rather than trusting the exit code alone: the point

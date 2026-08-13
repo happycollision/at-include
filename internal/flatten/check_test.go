@@ -169,7 +169,7 @@ func TestCheckMissingOutputIsStaleNotAnError(t *testing.T) {
 // the "  "/"- "/"+ " line prefixes — as golden values. These are not derived
 // from any formula in the test; they're the literal expected rendering, so a
 // change to any of them means the excerpt format changed and the fixture
-// suite (and any tooling that parses --check output) would need updating.
+// suite (and any tooling that parses check output) would need updating.
 var firstDiffExcerptCases = []struct{ actual, expected, want string }{
 	{"a\nb\nc", "a\nb\nc", "First difference around line 4:\n  b\n  c"},
 	{"X\nb\nc", "a\nb\nc", "First difference around line 1:\n- X\n+ a\n  b\n  c"},

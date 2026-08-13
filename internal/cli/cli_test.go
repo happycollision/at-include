@@ -353,11 +353,13 @@ func TestRunMaxDepthInvalidValues(t *testing.T) {
 			t.Errorf("--max-depth %q: stderr = %q", v, stderr)
 		}
 	}
+	// A missing value is a different failure from a malformed one, and gets the
+	// same "requires a value" wording every other flag uses.
 	code, _, stderr := run(t, dir, []string{"build", "--max-depth"}, "")
 	if code != 2 {
 		t.Errorf("--max-depth with no value: code = %d, want 2", code)
 	}
-	if !strings.Contains(stderr, "non-negative integer") {
+	if !strings.Contains(stderr, "--max-depth requires a value") {
 		t.Errorf("stderr = %q", stderr)
 	}
 }
@@ -554,7 +556,7 @@ func TestRunOutDifferentFromSrcStillWorks(t *testing.T) {
 }
 
 // --- Fix 2: regenCommand must print a command that, run from the caller's
-// CWD, actually regenerates the right files and makes --check pass. ---
+// CWD, actually regenerates the right files and makes `check` pass. ---
 
 func TestRegenCommandDefaults(t *testing.T) {
 	got := regenCommand(options{src: defaultSrc, out: defaultOut})
@@ -581,8 +583,8 @@ func TestRegenCommandSubdirectorySrc(t *testing.T) {
 func TestRegenCommandEmitsRoot(t *testing.T) {
 	// With --root explicitly set (even to "."), the suggestion must include
 	// it: omitting --root here means the regenerated markers resolve against
-	// a different root than the one --check actually used, so following the
-	// printed command would NOT make --check pass.
+	// a different root than the one `check` actually used, so following the
+	// printed command would NOT make `check` pass.
 	got := regenCommand(options{
 		src: defaultSrc, out: defaultOut,
 		root: ".", rootSet: true,
@@ -621,8 +623,8 @@ func TestRegenCommandExplicitEmptyMarkerDesc(t *testing.T) {
 
 // TestRunCheckSuggestionRoundTrips is the end-to-end guarantee behind Fix 2:
 // generate into a subdirectory with an explicit --root, go stale, run
-// --check, and confirm that running the EXACT command printed after "Run: "
-// (parsed the same way argv normally would be) makes a follow-up --check
+// `check`, and confirm that running the EXACT command printed after "Run: "
+// (parsed the same way argv normally would be) makes a follow-up `check`
 // pass. This is what "the suggestion actually works" means operationally.
 func TestRunCheckSuggestionRoundTrips(t *testing.T) {
 	dir := writeTree(t, map[string]string{
@@ -639,7 +641,7 @@ func TestRunCheckSuggestionRoundTrips(t *testing.T) {
 
 	code, stdout, stderr := run(t, dir, []string{"check", "--src", "docs/CLAUDE.src.md", "--out", "docs/CLAUDE.md", "--root", "."}, "")
 	if code != 1 {
-		t.Fatalf("--check should fail while stale: code = %d, stderr = %q", code, stderr)
+		t.Fatalf("check should fail while stale: code = %d, stderr = %q", code, stderr)
 	}
 	const prefix = "docs/CLAUDE.md is out of date. Run: "
 	if !strings.HasPrefix(stdout, prefix) {
@@ -662,7 +664,7 @@ func TestRunCheckSuggestionRoundTrips(t *testing.T) {
 	checkArgv := append([]string{"check"}, suggestedArgv[1:]...)
 	code, stdout, stderr = run(t, dir, checkArgv, "")
 	if code != 0 {
-		t.Fatalf("--check after following the suggestion should pass: code = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		t.Fatalf("check after following the suggestion should pass: code = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 	}
 	if !strings.Contains(stdout, "up to date") {
 		t.Errorf("stdout = %q", stdout)

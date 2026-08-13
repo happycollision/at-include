@@ -40,7 +40,7 @@ func Check(opts Options) (CheckResult, error) {
 	}
 	// #nosec G304 G703 -- opts.OutPath is the tool's own configured output
 	// path; reading it back to compare against a fresh render is the entire
-	// point of --check.
+	// point of check.
 	actual, err := os.ReadFile(opts.OutPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
