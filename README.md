@@ -268,6 +268,7 @@ the ones it takes:
                       only)
   --root <path>       Root for marker paths (default: the source file's
                       directory, or the current directory when --src is "-")
+                      (build, check, supplement)
   --max-depth <n>     Error if a resolved import chain exceeds n hops
                       (build, check, supplement; default: no limit — cycles
                       terminate on their own via the inline-once rule)
