@@ -57,13 +57,13 @@ depends = ["check"]
 description = "Regenerate AGENTS.md from AGENTS.src.md (dogfoods at-include on this repo)"
 depends = ["build"]
 shell = "bash -c" # see the note on [tasks.build]
-run = "./dist/at-include"
+run = "./dist/at-include build"
 
 [tasks."docs:check"]
 description = "Verify AGENTS.md is up to date (CI gate, dogfoods at-include on this repo)"
 depends = ["build"]
 shell = "bash -c" # see the note on [tasks.build]
-run = "./dist/at-include --check"
+run = "./dist/at-include check"
 
 [tasks.changelog]
 description = "Batch unreleased changie fragments into CHANGELOG.md (VERSION=vX.Y.Z to override the auto-computed bump)"

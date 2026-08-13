@@ -119,7 +119,7 @@ legitimately needs to store CRLF content on purpose, it still can — the
 Comparing `expect/files/*` only ever checks paths you explicitly listed —
 it has no way to notice an *unexpected* file the tool wrote (for example, a
 usage error accidentally still leaving behind an output file, or
-`--list-imports` writing `AGENTS.md` when it should only print to stdout).
+`imports` writing `AGENTS.md` when it should only print to stdout).
 
 `expect/absent` closes that gap: it lists paths (one per line, relative to
 the working directory, blank lines and `#`-comments ignored) that must **not**
@@ -144,14 +144,16 @@ not the real release version).
 
 ## Worked example: adding a new case
 
-Say you want to pin the behavior of `--out /dev/null`-style edge cases (this
-is illustrative, not a real gap). Steps:
+Say you want to pin the behavior of `build --out /dev/null`-style edge cases
+(this is illustrative, not a real gap). Steps:
 
-1. `mkdir -p test/cases/out-devnull/files`
+1. `mkdir -p test/cases/build-out-devnull/files`
 2. Add whatever fixture files the case needs under
-   `test/cases/out-devnull/files/`, e.g. an `AGENTS.src.md`.
-3. Write `test/cases/out-devnull/cmd` with the argv, one flag/value per line:
+   `test/cases/build-out-devnull/files/`, e.g. an `AGENTS.src.md`.
+3. Write `test/cases/build-out-devnull/cmd` with the argv, one token per line —
+   the subcommand name comes first:
    ```
+   build
    --out
    /dev/null
    ```
@@ -159,17 +161,17 @@ is illustrative, not a real gap). Steps:
    of the same `files/` tree, exactly as the harness would, to generate the
    real golden output — **never hand-write expected output**:
    ```sh
-   cp -R test/cases/out-devnull/files /tmp/try && cd /tmp/try
-   /path/to/at-include --out /dev/null
+   cp -R test/cases/build-out-devnull/files /tmp/try && cd /tmp/try
+   /path/to/at-include build --out /dev/null
    echo "exit=$?"
    ```
 5. Read the actual stdout/stderr/exit code/output files it produced and
    confirm they match the documented behavior (don't just copy a buggy run
    blindly — a golden file is only as trustworthy as the verification behind
    it).
-6. Populate `test/cases/out-devnull/expect/` from what you observed:
+6. Populate `test/cases/build-out-devnull/expect/` from what you observed:
    `exit`, `stdout`, `stderr`, `files/...`, and/or `absent` as needed.
-7. Run `go test ./test/ -run TestCases/out-devnull -v` to confirm it passes,
+7. Run `go test ./test/ -run TestCases/build-out-devnull -v` to confirm it passes,
    then run the full suite (`go test ./test/ -v`) to make sure nothing else
    broke.
 

@@ -86,7 +86,7 @@ func tail(s string) string {
 	return s
 }
 
-func TestGenerateHookModeUsesPreambleNotBanner(t *testing.T) {
+func TestGenerateSupplementUsesPreambleNotBanner(t *testing.T) {
 	t.Parallel()
 	root := makeTree(t, map[string]string{
 		"AGENTS.md": "Body line\n\n@x.md\n",
@@ -94,16 +94,16 @@ func TestGenerateHookModeUsesPreambleNotBanner(t *testing.T) {
 	})
 	opts := optsFor(root)
 	opts.SrcPath = filepath.Join(root, "AGENTS.md")
-	opts.HookMode = true
+	opts.Supplement = true
 	out, err := Generate(opts)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	if strings.Contains(out, "This file is generated") {
-		t.Errorf("hook-mode output should not contain the normal banner\ngot:\n%s", out)
+		t.Errorf("supplement output should not contain the normal banner\ngot:\n%s", out)
 	}
 	if !strings.Contains(out, "pre-expanded") {
-		t.Errorf("hook-mode output should contain the hook preamble\ngot:\n%s", out)
+		t.Errorf("supplement output should contain the supplement preamble\ngot:\n%s", out)
 	}
 	for _, want := range []string{"Body line", "X-CONTENT"} {
 		if !strings.Contains(out, want) {
@@ -169,7 +169,7 @@ func TestCheckMissingOutputIsStaleNotAnError(t *testing.T) {
 // the "  "/"- "/"+ " line prefixes — as golden values. These are not derived
 // from any formula in the test; they're the literal expected rendering, so a
 // change to any of them means the excerpt format changed and the fixture
-// suite (and any tooling that parses --check output) would need updating.
+// suite (and any tooling that parses check output) would need updating.
 var firstDiffExcerptCases = []struct{ actual, expected, want string }{
 	{"a\nb\nc", "a\nb\nc", "First difference around line 4:\n  b\n  c"},
 	{"X\nb\nc", "a\nb\nc", "First difference around line 1:\n- X\n+ a\n  b\n  c"},

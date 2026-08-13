@@ -5,9 +5,18 @@ import (
 	"testing"
 )
 
-func TestHookPreambleMentionsImportSyntaxAndUnresolvedPointer(t *testing.T) {
+func TestBannerRegenCommandLine(t *testing.T) {
 	t.Parallel()
-	p := HookPreamble()
+	b := Banner(Options{})
+	want := "> `at-include build --src AGENTS.src.md --out AGENTS.md`"
+	if !strings.Contains(b, want) {
+		t.Errorf("banner missing regen command line %q\ngot:\n%s", want, b)
+	}
+}
+
+func TestSupplementPreambleMentionsImportSyntaxAndUnresolvedPointer(t *testing.T) {
+	t.Parallel()
+	p := SupplementPreamble()
 	for _, want := range []string{
 		"@path",
 		"AGENTS.md",
@@ -24,11 +33,11 @@ func TestHookPreambleMentionsImportSyntaxAndUnresolvedPointer(t *testing.T) {
 	}
 }
 
-func TestHookPreambleIsFixedRegardlessOfOptions(t *testing.T) {
+func TestSupplementPreambleIsFixedRegardlessOfOptions(t *testing.T) {
 	t.Parallel()
-	first := HookPreamble()
-	second := HookPreamble()
+	first := SupplementPreamble()
+	second := SupplementPreamble()
 	if first != second {
-		t.Error("HookPreamble should return identical text on every call")
+		t.Error("SupplementPreamble should return identical text on every call")
 	}
 }

@@ -84,7 +84,7 @@ func TestFindImports(t *testing.T) {
 		// backtick), a backtick is just an ordinary, non-whitespace
 		// character — matching the expander's transformLine exactly (see
 		// scanLine's doc comment in scan.go). This is the case that used to
-		// make --list-imports disagree with expansion. Compare with "ignores
+		// make `imports` disagree with expansion. Compare with "ignores
 		// an inline code span that starts before the @" above, and see the
 		// fenced-and-inline-code fixture / TestFlattenPreservesFencedAndInlineCode
 		// for the corresponding expansion-side behavior with a *bare*

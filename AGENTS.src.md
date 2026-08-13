@@ -1,6 +1,6 @@
 # at-include — agent instructions
 
-`at-include` flattens `@<path>` Markdown imports, following the same
+`at-include` expands `@<path>` Markdown imports, following the same
 conventions Claude Code uses to inline `@`-referenced files from a `CLAUDE.md`.
 
 **Do not treat parity with Claude Code as the spec.** The resemblance is by
@@ -80,9 +80,9 @@ and were asked to change `AGENTS.md`, make the change here (or in an imported
 file such as `docs/architecture.md`) and regenerate:
 
 ```sh
-mise run build && ./dist/at-include
+mise run build && ./dist/at-include build
 ```
 
-`mise run docs:check` (or `./dist/at-include --check`) verifies `AGENTS.md` is
+`mise run docs:check` (or `./dist/at-include check`) verifies `AGENTS.md` is
 up to date without writing anything; CI and the pre-commit hook both rely on
 this.

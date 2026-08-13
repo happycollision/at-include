@@ -40,11 +40,11 @@ type Options struct {
 	// flatten.Options value alongside Stdin, without a second parallel struct.
 	OutIsStdout bool
 
-	// HookMode signals that Generate should prepend HookPreamble() instead of
-	// Banner(opts). Intended for a lifecycle-hook invocation (e.g. Codex's
-	// SessionStart) whose stdout is injected as model context rather than
-	// written to a file — see docs/superpowers/specs/2026-08-06-hook-mode-design.md.
-	HookMode bool
+	// Supplement signals that Generate should prepend SupplementPreamble()
+	// instead of Banner(opts). Intended for a lifecycle-hook invocation (e.g.
+	// Codex's SessionStart) whose stdout is injected as model context rather
+	// than written to a file — see docs/superpowers/specs/2026-08-06-hook-mode-design.md.
+	Supplement bool
 }
 
 func (o Options) markerDesc() string {
@@ -179,7 +179,7 @@ func (e *expander) transform(text, importerAbsPath string, depth int) (string, e
 // transformLine rebuilds one line: inline code spans are kept verbatim
 // (backticks included) and resolvable @tokens are replaced. It splits the
 // line into pieces with the same scanLine rule FindImports uses (scan.go), so
-// --list-imports always reports exactly the tokens expansion would consider.
+// `imports` always reports exactly the tokens expansion would consider.
 func (e *expander) transformLine(line, importerDir string, depth int) (string, error) {
 	var b strings.Builder
 	for _, piece := range scanLine(line) {

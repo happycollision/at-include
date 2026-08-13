@@ -1,0 +1,3 @@
+kind: Changed
+body: 'Breaking: the CLI is now subcommand-based. Bare ''at-include'' is a usage error; use ''at-include build'' (the old default invocation), ''at-include check'' (was --check), ''at-include supplement'' (was --hook-mode), and ''at-include imports'' (was --list-imports). Update mise tasks, git hooks, CI steps, and agent lifecycle hooks accordingly.'
+time: 2026-08-13T10:50:38.183554-04:00

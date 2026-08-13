@@ -16,16 +16,17 @@ type CheckResult struct {
 }
 
 // Generate returns the full output text: banner, a blank line, then the
-// flattened source, ending in exactly one newline. When opts.HookMode is set,
-// HookPreamble() is used in place of Banner(opts) — see HookPreamble's doc
-// comment for why the two are not configured the same way.
+// flattened source, ending in exactly one newline. When opts.Supplement is
+// set, SupplementPreamble() is used in place of Banner(opts) — see
+// SupplementPreamble's doc comment for why the two are not configured the
+// same way.
 func Generate(opts Options) (string, error) {
 	content, _, err := Flatten(opts)
 	if err != nil {
 		return "", err
 	}
-	if opts.HookMode {
-		return Assemble(HookPreamble(), content), nil
+	if opts.Supplement {
+		return Assemble(SupplementPreamble(), content), nil
 	}
 	return Assemble(Banner(opts), content), nil
 }
@@ -39,7 +40,7 @@ func Check(opts Options) (CheckResult, error) {
 	}
 	// #nosec G304 G703 -- opts.OutPath is the tool's own configured output
 	// path; reading it back to compare against a fresh render is the entire
-	// point of --check.
+	// point of check.
 	actual, err := os.ReadFile(opts.OutPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

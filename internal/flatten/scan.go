@@ -96,9 +96,9 @@ type linePiece struct {
 // scanLine walks one line (already known not to be a fence delimiter or
 // inside a fenced block) and splits it into literal runs and '@' token
 // candidates. This is the single token-scanning rule shared by FindImports
-// (--list-imports) and the expander's line transform (expand.go's
-// transformLine), so the two always agree about which tokens exist in a
-// given line.
+// (used by the `imports` subcommand) and the expander's line transform
+// (expand.go's transformLine), so the two always agree about which tokens
+// exist in a given line.
 //
 // The rule:
 //   - A run of one or more backticks opens an inline code span. It is closed

@@ -2,7 +2,7 @@
 #
 # This file does double duty: it's what keeps *this* repo's commits clean,
 # and it's the worked example the README points readers at when it suggests
-# wiring at-include's own `--check` into a pre-push (or pre-commit) hook in
+# wiring at-include's own `check` into a pre-push (or pre-commit) hook in
 # their own project via lefthook.
 #
 # Install locally with:
@@ -69,7 +69,7 @@ pre-commit:
     # silently matches nothing, disabling the job.
     - name: agents-build
       glob: "AGENTS.src.md"
-      run: go run ./cmd/at-include
+      run: go run ./cmd/at-include build
       stage_fixed: true
 
     - group:
