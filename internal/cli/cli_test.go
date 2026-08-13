@@ -414,6 +414,20 @@ func TestRunListImports(t *testing.T) {
 	}
 }
 
+func TestRunImportsSrcIsDirectoryIsRuntimeError(t *testing.T) {
+	dir := writeTree(t, map[string]string{"AGENTS.src.md": "Body\n"})
+	code, _, stderr := run(t, dir, []string{"imports", "--src", "."}, "")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (runtime error, not a usage error)", code)
+	}
+	if !strings.Contains(stderr, "at-include:") {
+		t.Fatalf("stderr = %q, want an at-include: error line", stderr)
+	}
+	if strings.Contains(stderr, "--out") {
+		t.Fatalf("stderr = %q must not blame --out; imports does not take --out", stderr)
+	}
+}
+
 func TestRunVersion(t *testing.T) {
 	dir := writeTree(t, map[string]string{"AGENTS.src.md": "x\n"})
 	code, stdout, _ := run(t, dir, []string{"--version"}, "")

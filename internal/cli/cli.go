@@ -167,7 +167,7 @@ var commands = map[string]commandSpec{
 	"build":      {name: "build", usage: buildUsage, defaultSrc: defaultSrc, defaultOut: defaultOut, takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: true},
 	"check":      {name: "check", usage: checkUsage, defaultSrc: defaultSrc, defaultOut: defaultOut, takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: false},
 	"supplement": {name: "supplement", usage: supplementUsage, defaultSrc: "AGENTS.md", defaultOut: "-", takesOut: true, takesRoot: true, takesDepth: true, takesMarker: true, allowSrcDash: true},
-	"imports":    {name: "imports", usage: importsUsage, defaultSrc: defaultSrc, allowSrcDash: true},
+	"imports":    {name: "imports", usage: importsUsage, defaultSrc: defaultSrc, defaultOut: "-", allowSrcDash: true},
 }
 
 // usageError marks a resolveOptions failure as a usage error (bad flag
