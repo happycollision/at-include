@@ -1,3 +1,0 @@
-kind: None
-body: 'Docs-only: clarifies for agents that changelog fragments are one-per-change (not one-per-push), belong in the same commit as the change, and that None-kind bodies should state why the change is exempt. No behavior change.'
-time: 2026-08-11T01:06:20.55594-04:00
