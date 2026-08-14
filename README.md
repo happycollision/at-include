@@ -1,66 +1,74 @@
 # at-include
 
-Expand `@<path>` Markdown imports, following the same conventions
-[Claude Code](https://claude.com/claude-code) uses to inline files referenced
-from a `CLAUDE.md` — as a standalone CLI you can run anywhere: locally, in CI,
-or from a git hook.
+Split your agent instructions across small, reusable files — and still hand
+every tool one flattened document. `at-include` expands `@<path>` Markdown
+imports, the same convention
+[Claude Code uses in `CLAUDE.md`](https://code.claude.com/docs/en/memory#import-additional-files),
+as a standalone CLI you can run anywhere: locally, in CI, in a Git hook, or
+in an agent session hook.
+
+## The problem
+
+TLDR: You want Claude Code's `@<path>` imports for tools other than Claude
+Code.
+
+Agent instruction files (`AGENTS.md`, `CLAUDE.md`) grow into monoliths,
+because the obvious way to split them up doesn't actually work. Writing "see
+`docs/security.md`" in your instructions is only ever a suggestion: the agent
+decides for itself whether following the pointer is worth a tool call, and
+under time or context pressure it can simply decide not to. Content you
+consider load-bearing may never reach it — and even when the agent does read
+the file, that's an extra round-trip it has to make, wait on, and pay context
+for.
+
+Claude Code solved this for its own `CLAUDE.md`: an `@docs/security.md`
+token is inlined into the instructions before the agent ever sees them — no
+judgment call, no round-trip. But nothing else supports the syntax.
+Codex's `AGENTS.md` has no way to reference another file at all, and neither
+does anything else that reads a plain `AGENTS.md`/`CLAUDE.md` (whatever
+adopts the [AGENTS.md convention](https://agents.md)). So today you either
+give up composability, or maintain duplicate, drifting instruction files per
+tool.
+
+`at-include` closes that gap: it does the same `@`-import expansion as a
+standalone tool, so every agent tool gets the flattened result — not just
+Claude Code.
+
+## How it works
+
+`at-include` reads a Markdown file, finds every `@<path>` token that resolves
+to a real file, and replaces the token with that file's contents —
+recursively, so an included file's own `@`-imports are expanded too. Tokens
+that don't resolve to a real file are left alone, and each file is inlined at
+most once, so cycles terminate. (The full matching rules are in
+[The `@path` rules](#the-path-rules).)
+
+There are two strategies for getting the expanded result in front of an
+agent, each with its own subcommand:
+
+- **[Build-time flattening](#build-time-flattening)** (`at-include build`) —
+  run it as a build step and check the generated `AGENTS.md` into the repo.
+  Every tool sees the exact same bytes, with zero setup on its end.
+- **[Load-time expansion](#load-time-expansion-supplement)**
+  (`at-include supplement`) — keep the `@`-imports unexpanded in `AGENTS.md`
+  and have a session-start hook inject the expansion as additional context.
+
+The rest of this README covers both in depth.
 
 > [!NOTE]
-> `at-include` is an independent implementation, not a port of Claude Code and
-> not affiliated with it. The goal is to behave the *same way in intent* on the
-> `@`-import syntax people actually write, and the rules below were checked
-> against real Claude Code behavior — but exact parity is not promised. Claude
-> Code's import handling is largely undocumented and free to change between
-> releases, so some differences already exist (see
-> [`docs/architecture.md`](docs/architecture.md)) and some drift over time is
-> expected. If your output has to match a specific Claude Code version byte for
-> byte, verify it yourself rather than assuming.
-
-Supported platforms: Linux (amd64, arm64), macOS (amd64, arm64), Windows (amd64).
-
-## What it does
-
-`at-include` finds every `@<path>` token in a Markdown file that resolves to
-a real file relative to where the token appears, and replaces the token with
-that file's contents — recursively, so an included file's own `@` imports are
-expanded too. This lets you author agent instructions across several small,
-reusable files instead of one large one, without giving up a single flattened
-document for tools to actually read.
-
-Splitting instructions across files is worth doing, but the naive way to do
-it — write "see `docs/security.md`" in your instructions and hope the agent
-goes and reads it — is only ever a suggestion. The agent decides for itself
-whether following that pointer is worth the effort, and it can simply
-decide not to, especially under time or context pressure; there's no
-guarantee content you consider load-bearing ever actually reaches it. Even
-when it does decide to read the file, that's a tool call it has to make,
-wait on, and pay context for, on top of whatever it was already doing.
-`@`-imports remove the judgment call for whatever you've chosen to always
-inline: that content is already in the first thing the agent reads, every
-session, no round-trip and no decision required — while leaving the agent
-free to go fetch anything else on its own.
-
-Claude Code already solves this for its own `CLAUDE.md` — it expands
-`@`-imports natively. Nothing else does: [Codex](https://developers.openai.com/codex)'s
-`AGENTS.md` has no way to reference another file at all, and neither does
-anything else that reads a plain `AGENTS.md`/`CLAUDE.md` (whatever adopts the
-[AGENTS.md](https://agents.md) convention). `at-include` brings Claude Code's
-capability to those tools too. Two overlapping reasons to want this:
-
-- **You use Codex** (or any tool without native `@`-imports) — there's no
-  Codex-native way to get that composability, so `at-include` fills the gap.
-- **You use both Claude Code and other tools** — without `at-include`, you'd
-  either maintain duplicate, drifting instruction files per tool, or give up
-  composability everywhere just to keep them in sync.
-
-`at-include` itself doesn't care which tool ends up reading its output — it
-just does the text transform.
+> `at-include` is an independent implementation, not a port of Claude Code
+> and not affiliated with it. It aims to behave the same way *in intent* on
+> the `@`-import syntax people actually write, and its rules were checked
+> against real Claude Code behavior — but Claude Code's import handling is
+> largely undocumented and free to change between releases, so exact,
+> byte-for-byte parity is not promised. Known differences are listed in
+> [`docs/architecture.md`](docs/architecture.md).
 
 ## Two ways to use this
 
-There are two strategies for getting `@`-expanded content in front of an
-agent. One trades more tracked files for a guarantee of exactly what gets
-loaded; the other trades that guarantee for fewer files and less setup.
+The two strategies trade differently: build-time flattening trades more
+tracked files for a hard guarantee of exactly what gets loaded; load-time
+expansion trades that guarantee for fewer files and less setup.
 
 ### Build-time flattening
 
@@ -183,6 +191,11 @@ The output is always: the framing text (`build`'s generated-file banner, or
 exactly one trailing newline.
 
 ## Install with mise (recommended)
+
+Supported platforms: Linux (amd64, arm64) and macOS (amd64, arm64). Windows
+(amd64) binaries are published and the full test suite runs on Windows in CI,
+but the tool has seen no real-world Windows use — bug reports and success
+reports both welcome.
 
 [mise](https://mise.jdx.dev) is a polyglot version manager. Pinning
 `at-include` through it in your repo's `mise.toml` means CI, git hooks, and
