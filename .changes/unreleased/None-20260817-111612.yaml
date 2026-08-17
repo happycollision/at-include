@@ -1,0 +1,3 @@
+kind: None
+body: Add CLAUDE.md, a one-line @-import of AGENTS.md so Claude Code picks up the existing agent instructions.
+time: 2026-08-17T11:16:12.559349-04:00
